@@ -5,6 +5,15 @@
 
   const OriginalEventSource = window.EventSource;
   const OriginalFetch = window.fetch;
+  const OriginalXHR = window.XMLHttpRequest;
+
+  const DEBUG = false; // Set to true for debugging
+
+  function log(...args) {
+    if (DEBUG) {
+      console.log('[Stream Panel]', ...args);
+    }
+  }
 
   // Generate unique ID
   function generateId() {
@@ -44,6 +53,7 @@
 
   // ============================================
   // Intercept native EventSource
+  // Standard SSE (Server-Sent Events) API
   // ============================================
   window.EventSource = function(url, options) {
     const es = new OriginalEventSource(url, options);
@@ -73,7 +83,7 @@
       });
     });
 
-    // Listen for message event
+    // Intercept message event listeners
     const originalAddEventListener = es.addEventListener.bind(es);
     es.addEventListener = function(type, listener, options) {
       if (type === 'message' || type.startsWith('message')) {
@@ -149,16 +159,12 @@
   window.EventSource.CLOSED = OriginalEventSource.CLOSED;
 
   // ============================================
-  // Intercept Fetch-based SSE
+  // Intercept Fetch-based SSE and Streaming Responses
+  // Only intercepts: SSE (text/event-stream), NDJSON (application/x-ndjson)
+  // Does NOT intercept regular JSON/text responses
   // ============================================
   window.fetch = async function(...args) {
     const response = await OriginalFetch.apply(this, args);
-
-    // Check if response is SSE
-    const contentType = response.headers.get('content-type') || '';
-    if (!contentType.includes('text/event-stream')) {
-      return response;
-    }
 
     // Get request URL
     let requestUrl = '';
@@ -171,8 +177,26 @@
     }
     const fullUrl = new URL(requestUrl, window.location.href).href;
 
+    // Check if response is streaming
+    const contentType = response.headers.get('content-type') || '';
+
+    log('Fetch intercepted:', fullUrl, 'Content-Type:', contentType);
+
+    // Only detect true streaming responses by content-type
+    // Do NOT use ReadableStream check as almost all fetch responses have it
+    const isSSE = contentType.includes('text/event-stream');
+    const isNDJSON = contentType.includes('application/x-ndjson') || contentType.includes('application/jsonlines');
+
+    // If not a streaming response, return as-is
+    if (!isSSE && !isNDJSON) {
+      return response;
+    }
+
+    log('Detected streaming response!', {isSSE, isNDJSON});
+
     const connectionId = generateId();
     let messageIndex = 0;
+    const streamType = isSSE ? 'SSE' : 'NDJSON';
 
     // Notify new connection
     postToContentScript({
@@ -181,8 +205,10 @@
       url: fullUrl,
       timestamp: Date.now(),
       readyState: 1,
-      source: 'fetch'
+      source: `fetch (${streamType})`
     });
+
+    log('Created connection:', connectionId, streamType);
 
     // Notify open
     postToContentScript({
@@ -212,18 +238,35 @@
             if (done) {
               // Process any remaining buffer
               if (buffer.trim()) {
-                const events = parseSSEEvents(buffer);
-                for (const event of events) {
-                  messageIndex++;
-                  postToContentScript({
-                    type: 'stream-message',
-                    connectionId: connectionId,
-                    messageId: messageIndex,
-                    eventType: event.event,
-                    data: event.data,
-                    lastEventId: event.id,
-                    timestamp: Date.now()
-                  });
+                if (isSSE) {
+                  const events = parseSSEEvents(buffer);
+                  for (const event of events) {
+                    messageIndex++;
+                    postToContentScript({
+                      type: 'stream-message',
+                      connectionId: connectionId,
+                      messageId: messageIndex,
+                      eventType: event.event,
+                      data: event.data,
+                      lastEventId: event.id,
+                      timestamp: Date.now()
+                    });
+                  }
+                } else if (isNDJSON) {
+                  // Parse newline-delimited JSON
+                  const lines = buffer.split('\n').filter(line => line.trim());
+                  for (const line of lines) {
+                    messageIndex++;
+                    postToContentScript({
+                      type: 'stream-message',
+                      connectionId: connectionId,
+                      messageId: messageIndex,
+                      eventType: 'message',
+                      data: line,
+                      lastEventId: '',
+                      timestamp: Date.now()
+                    });
+                  }
                 }
               }
 
@@ -241,24 +284,47 @@
             const chunk = decoder.decode(value, { stream: true });
             buffer += chunk;
 
-            // Parse complete SSE events from buffer
-            const doubleNewlineIndex = buffer.lastIndexOf('\n\n');
-            if (doubleNewlineIndex !== -1) {
-              const completeData = buffer.substring(0, doubleNewlineIndex + 2);
-              buffer = buffer.substring(doubleNewlineIndex + 2);
+            // Parse based on stream type
+            if (isSSE) {
+              // Parse complete SSE events from buffer
+              const doubleNewlineIndex = buffer.lastIndexOf('\n\n');
+              if (doubleNewlineIndex !== -1) {
+                const completeData = buffer.substring(0, doubleNewlineIndex + 2);
+                buffer = buffer.substring(doubleNewlineIndex + 2);
 
-              const events = parseSSEEvents(completeData);
-              for (const event of events) {
-                messageIndex++;
-                postToContentScript({
-                  type: 'stream-message',
-                  connectionId: connectionId,
-                  messageId: messageIndex,
-                  eventType: event.event,
-                  data: event.data,
-                  lastEventId: event.id,
-                  timestamp: Date.now()
-                });
+                const events = parseSSEEvents(completeData);
+                for (const event of events) {
+                  messageIndex++;
+                  postToContentScript({
+                    type: 'stream-message',
+                    connectionId: connectionId,
+                    messageId: messageIndex,
+                    eventType: event.event,
+                    data: event.data,
+                    lastEventId: event.id,
+                    timestamp: Date.now()
+                  });
+                }
+              }
+            } else if (isNDJSON) {
+              // Parse newline-delimited JSON
+              const lines = buffer.split('\n');
+              // Keep the last incomplete line in buffer
+              buffer = lines.pop() || '';
+
+              for (const line of lines) {
+                if (line.trim()) {
+                  messageIndex++;
+                  postToContentScript({
+                    type: 'stream-message',
+                    connectionId: connectionId,
+                    messageId: messageIndex,
+                    eventType: 'message',
+                    data: line,
+                    lastEventId: '',
+                    timestamp: Date.now()
+                  });
+                }
               }
             }
 
@@ -266,6 +332,7 @@
             controller.enqueue(value);
           }
         } catch (error) {
+          log('Stream error:', error);
           postToContentScript({
             type: 'stream-error',
             connectionId: connectionId,
@@ -277,6 +344,7 @@
       },
 
       cancel() {
+        log('Stream cancelled');
         postToContentScript({
           type: 'stream-close',
           connectionId: connectionId,
@@ -294,5 +362,160 @@
     });
   };
 
-  console.log('[Stream Panel] EventSource & Fetch SSE interceptor injected');
+  // ============================================
+  // Intercept XMLHttpRequest for SSE and Streaming
+  // Supports: text/event-stream, application/x-ndjson, application/jsonlines
+  // ============================================
+  window.XMLHttpRequest = function() {
+    const xhr = new OriginalXHR();
+    let connectionId = null;
+    let messageIndex = 0;
+    let requestUrl = '';
+    let isStreamingResponse = false;
+    let buffer = '';
+
+    // Intercept open method to capture URL
+    const originalOpen = xhr.open;
+    xhr.open = function(method, url, ...args) {
+      requestUrl = new URL(url, window.location.href).href;
+      log('XHR open:', method, requestUrl);
+      return originalOpen.call(this, method, url, ...args);
+    };
+
+    // Intercept send method to monitor streaming responses
+    const originalSend = xhr.send;
+    xhr.send = function(...args) {
+      log('XHR send:', requestUrl);
+
+      // Monitor readyState changes for streaming detection
+      const originalOnReadyStateChange = xhr.onreadystatechange;
+      xhr.onreadystatechange = function() {
+        log('XHR readyState:', xhr.readyState, 'status:', xhr.status);
+
+        // HEADERS_RECEIVED: Detect if response is streaming
+        if (xhr.readyState === 2) {
+          const contentType = xhr.getResponseHeader('content-type') || '';
+          log('XHR Content-Type:', contentType);
+
+          isStreamingResponse = contentType.includes('text/event-stream') ||
+                                contentType.includes('application/x-ndjson') ||
+                                contentType.includes('application/jsonlines');
+
+          if (isStreamingResponse) {
+            connectionId = generateId();
+            messageIndex = 0;
+            buffer = '';
+
+            const streamType = contentType.includes('text/event-stream') ? 'SSE' :
+                              contentType.includes('application/x-ndjson') ? 'NDJSON' : 'Stream';
+
+            log('Detected XHR streaming response!', streamType);
+
+            postToContentScript({
+              type: 'stream-connection',
+              connectionId: connectionId,
+              url: requestUrl,
+              timestamp: Date.now(),
+              readyState: 1,
+              source: `XMLHttpRequest (${streamType})`
+            });
+
+            postToContentScript({
+              type: 'stream-open',
+              connectionId: connectionId,
+              timestamp: Date.now(),
+              readyState: 1
+            });
+          }
+        }
+
+        // LOADING: Process streaming data chunks
+        if (xhr.readyState === 3 && isStreamingResponse) {
+          const contentType = xhr.getResponseHeader('content-type') || '';
+          const currentText = xhr.responseText || '';
+
+          // Extract only new data since last check
+          const newData = currentText.substring(buffer.length);
+          buffer = currentText;
+
+          if (newData) {
+            log('XHR received chunk, length:', newData.length);
+
+            if (contentType.includes('text/event-stream')) {
+              // Parse Server-Sent Events (SSE)
+              const events = parseSSEEvents(newData);
+              for (const event of events) {
+                messageIndex++;
+                postToContentScript({
+                  type: 'stream-message',
+                  connectionId: connectionId,
+                  messageId: messageIndex,
+                  eventType: event.event,
+                  data: event.data,
+                  lastEventId: event.id,
+                  timestamp: Date.now()
+                });
+              }
+            } else if (contentType.includes('application/x-ndjson') || contentType.includes('application/jsonlines')) {
+              // Parse Newline-Delimited JSON (NDJSON)
+              const lines = newData.split('\n').filter(line => line.trim());
+              for (const line of lines) {
+                messageIndex++;
+                postToContentScript({
+                  type: 'stream-message',
+                  connectionId: connectionId,
+                  messageId: messageIndex,
+                  eventType: 'message',
+                  data: line,
+                  lastEventId: '',
+                  timestamp: Date.now()
+                });
+              }
+            } else {
+              // Generic streaming data
+              messageIndex++;
+              postToContentScript({
+                type: 'stream-message',
+                connectionId: connectionId,
+                messageId: messageIndex,
+                eventType: 'message',
+                data: newData,
+                lastEventId: '',
+                timestamp: Date.now()
+              });
+            }
+          }
+        }
+
+        // DONE: Stream completed
+        if (xhr.readyState === 4 && isStreamingResponse) {
+          log('XHR stream completed');
+          postToContentScript({
+            type: 'stream-close',
+            connectionId: connectionId,
+            timestamp: Date.now()
+          });
+        }
+
+        // Call original handler if exists
+        if (originalOnReadyStateChange) {
+          return originalOnReadyStateChange.apply(this, arguments);
+        }
+      };
+
+      return originalSend.apply(this, args);
+    };
+
+    return xhr;
+  };
+
+  // Copy static properties
+  window.XMLHttpRequest.prototype = OriginalXHR.prototype;
+  window.XMLHttpRequest.UNSENT = OriginalXHR.UNSENT;
+  window.XMLHttpRequest.OPENED = OriginalXHR.OPENED;
+  window.XMLHttpRequest.HEADERS_RECEIVED = OriginalXHR.HEADERS_RECEIVED;
+  window.XMLHttpRequest.LOADING = OriginalXHR.LOADING;
+  window.XMLHttpRequest.DONE = OriginalXHR.DONE;
+
+  console.log('[Stream Panel] EventSource, Fetch & XMLHttpRequest interceptor injected');
 })();

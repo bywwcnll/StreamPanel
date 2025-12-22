@@ -4,6 +4,7 @@ const state = {
   selectedConnectionId: null,
   selectedMessageId: null,
   filter: '',
+  requestTypeFilter: 'all', // Request type filter: 'all', 'fetch', 'xhr', 'eventsource'
   messageFilters: [], // Applied filters
   pendingFilters: [], // Filters being edited, not yet applied
   searchQuery: '' // Message search query
@@ -24,6 +25,7 @@ const elements = {
   btnReplay: document.getElementById('btn-replay'),
   btnStats: document.getElementById('btn-stats'),
   filterInput: document.getElementById('filter-input'),
+  requestTypeFilter: document.getElementById('request-type-filter'),
   messageFilterContainer: document.getElementById('message-filter-container'),
   filterConditions: document.getElementById('filter-conditions'),
   filterStats: document.getElementById('filter-stats'),
@@ -93,6 +95,7 @@ function handleStreamEvent(payload) {
         url: payload.url,
         frameUrl: payload.frameUrl,
         isIframe: payload.isIframe,
+        source: payload.source || 'unknown', // Save source type
         status: 'connecting',
         createdAt: payload.timestamp,
         messages: []
@@ -139,15 +142,34 @@ function handleStreamEvent(payload) {
   }
 }
 
+// Get request type from source string
+function getRequestType(source) {
+  if (!source) return 'unknown';
+  const lowerSource = source.toLowerCase();
+  if (lowerSource.includes('xmlhttprequest')) return 'xhr';
+  if (lowerSource.includes('fetch')) return 'fetch';
+  if (lowerSource.includes('eventsource')) return 'eventsource';
+  return 'unknown';
+}
+
 // Render connection list
 function renderConnectionList() {
   const connections = Object.values(state.connections);
-  const filter = state.filter.toLowerCase();
+  const urlFilter = state.filter.toLowerCase();
+  const typeFilter = state.requestTypeFilter;
 
-  // Filter connections
-  const filtered = filter
-    ? connections.filter(c => c.url.toLowerCase().includes(filter))
+  // Filter connections by URL
+  let filtered = urlFilter
+    ? connections.filter(c => c.url.toLowerCase().includes(urlFilter))
     : connections;
+
+  // Filter connections by request type
+  if (typeFilter !== 'all') {
+    filtered = filtered.filter(c => {
+      const requestType = getRequestType(c.source);
+      return requestType === typeFilter;
+    });
+  }
 
   // Sort by creation time (newest first)
   filtered.sort((a, b) => b.createdAt - a.createdAt);
@@ -423,6 +445,11 @@ elements.btnCopy.addEventListener('click', () => {
 
 elements.filterInput.addEventListener('input', (e) => {
   state.filter = e.target.value;
+  renderConnectionList();
+});
+
+elements.requestTypeFilter.addEventListener('change', (e) => {
+  state.requestTypeFilter = e.target.value;
   renderConnectionList();
 });
 

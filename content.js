@@ -5,7 +5,17 @@
   script.onload = function() {
     this.remove();
   };
-  (document.head || document.documentElement).appendChild(script);
+
+  // Try to inject as early as possible
+  const target = document.head || document.documentElement;
+  if (target) {
+    target.appendChild(script);
+  } else {
+    // If document is not ready, wait for DOMContentLoaded
+    document.addEventListener('DOMContentLoaded', function() {
+      (document.head || document.documentElement).appendChild(script);
+    });
+  }
 })();
 
 // Determine if current context is an iframe

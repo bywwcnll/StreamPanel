@@ -92,6 +92,26 @@ html, body {
   background-color: var(--border-color);
 }
 
+.request-type-filter {
+  padding: 4px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 12px;
+  cursor: pointer;
+  outline: none;
+}
+
+.request-type-filter:hover {
+  border-color: var(--accent-color);
+}
+
+.request-type-filter:focus {
+  border-color: var(--accent-color);
+  box-shadow: 0 0 0 1px var(--accent-color);
+}
+
 .filter-input {
   flex: 1;
   max-width: 300px;
