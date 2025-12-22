@@ -16,6 +16,14 @@
       </svg>
       清空
     </button>
+    <button id="btn-stats" class="toolbar-btn" title="查看连接统计">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <line x1="12" y1="20" x2="12" y2="10"></line>
+        <line x1="18" y1="20" x2="18" y2="4"></line>
+        <line x1="6" y1="20" x2="6" y2="16"></line>
+      </svg>
+      统计
+    </button>
     <div class="export-dropdown">
       <button id="btn-export" class="toolbar-btn" title="导出数据">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -93,6 +101,19 @@
       <div id="message-list-view" class="view active">
         <div class="panel-header">
           <span style="flex: 1;">消息列表</span>
+          <div class="search-container">
+            <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="11" cy="11" r="8"></circle>
+              <path d="m21 21-4.35-4.35"></path>
+            </svg>
+            <input type="text" id="message-search-input" class="search-input" placeholder="搜索消息内容...">
+            <button id="btn-clear-search" class="clear-search-btn" style="display: none;" title="清除搜索">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+              </svg>
+            </button>
+          </div>
           <button id="btn-toggle-filter" class="toolbar-btn toggle-btn" title="显示/隐藏筛选器">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
@@ -110,6 +131,8 @@
             <div class="filter-actions">
               <button id="btn-add-filter" class="filter-btn">添加筛选条件</button>
               <button id="btn-apply-filters" class="filter-btn">应用筛选</button>
+              <button id="btn-save-preset" class="filter-btn" title="保存当前筛选条件为预设">保存预设</button>
+              <button id="btn-load-preset" class="filter-btn" title="加载已保存的预设">加载预设</button>
               <button id="btn-clear-filters" class="filter-btn">清除所有</button>
             </div>
           </div>
@@ -143,6 +166,13 @@
             返回
           </button>
           <span id="detail-title" class="detail-title"></span>
+          <button id="btn-replay" class="toolbar-btn" title="重放此消息（复制到剪贴板）" style="margin-right: 8px;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="23 4 23 10 17 10"></polyline>
+              <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+            </svg>
+            重放
+          </button>
           <button id="btn-copy" class="toolbar-btn" title="复制到剪贴板">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
@@ -152,6 +182,71 @@
         </div>
         <div id="detail-content" class="detail-content">
           <pre id="detail-json"></pre>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Preset Management Modal -->
+  <div id="preset-modal" class="modal" style="display: none;">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 class="modal-title" id="preset-modal-title">筛选预设</h3>
+        <button class="modal-close" id="preset-modal-close">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+      <div class="modal-body" id="preset-modal-body">
+        <!-- Dynamic content will be inserted here -->
+      </div>
+      <div class="modal-footer" id="preset-modal-footer">
+        <!-- Dynamic buttons will be inserted here -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Connection Statistics Modal -->
+  <div id="stats-modal" class="modal" style="display: none;">
+    <div class="modal-content modal-large">
+      <div class="modal-header">
+        <h3 class="modal-title">连接统计</h3>
+        <button class="modal-close" id="stats-modal-close">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+      <div class="modal-body" id="stats-modal-body">
+        <div class="stats-container">
+          <div class="stats-section">
+            <h4>总览</h4>
+            <div class="stats-grid">
+              <div class="stat-item">
+                <div class="stat-label">总连接数</div>
+                <div class="stat-value" id="stat-total-connections">0</div>
+              </div>
+              <div class="stat-item">
+                <div class="stat-label">活跃连接</div>
+                <div class="stat-value" id="stat-active-connections">0</div>
+              </div>
+              <div class="stat-item">
+                <div class="stat-label">总消息数</div>
+                <div class="stat-value" id="stat-total-messages">0</div>
+              </div>
+              <div class="stat-item">
+                <div class="stat-label">平均每连接消息数</div>
+                <div class="stat-value" id="stat-avg-messages">0</div>
+              </div>
+            </div>
+          </div>
+          <div class="stats-section">
+            <h4>连接详情</h4>
+            <div id="stats-connection-list" class="stats-list"></div>
+          </div>
         </div>
       </div>
     </div>

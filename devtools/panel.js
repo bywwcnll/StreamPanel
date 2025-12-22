@@ -5,7 +5,8 @@ const state = {
   selectedMessageId: null,
   filter: '',
   messageFilters: [], // Applied filters
-  pendingFilters: [] // Filters being edited, not yet applied
+  pendingFilters: [], // Filters being edited, not yet applied
+  searchQuery: '' // Message search query
 };
 
 // DOM elements
@@ -20,6 +21,8 @@ const elements = {
   btnClear: document.getElementById('btn-clear'),
   btnBack: document.getElementById('btn-back'),
   btnCopy: document.getElementById('btn-copy'),
+  btnReplay: document.getElementById('btn-replay'),
+  btnStats: document.getElementById('btn-stats'),
   filterInput: document.getElementById('filter-input'),
   messageFilterContainer: document.getElementById('message-filter-container'),
   filterConditions: document.getElementById('filter-conditions'),
@@ -28,10 +31,23 @@ const elements = {
   btnApplyFilters: document.getElementById('btn-apply-filters'),
   btnClearFilters: document.getElementById('btn-clear-filters'),
   btnToggleFilter: document.getElementById('btn-toggle-filter'),
+  btnSavePreset: document.getElementById('btn-save-preset'),
+  btnLoadPreset: document.getElementById('btn-load-preset'),
+  messageSearchInput: document.getElementById('message-search-input'),
+  btnClearSearch: document.getElementById('btn-clear-search'),
   // Export elements
   exportDropdown: document.querySelector('.export-dropdown'),
   btnExport: document.getElementById('btn-export'),
-  exportMenu: document.getElementById('export-menu')
+  exportMenu: document.getElementById('export-menu'),
+  // Modal elements
+  presetModal: document.getElementById('preset-modal'),
+  presetModalTitle: document.getElementById('preset-modal-title'),
+  presetModalBody: document.getElementById('preset-modal-body'),
+  presetModalFooter: document.getElementById('preset-modal-footer'),
+  presetModalClose: document.getElementById('preset-modal-close'),
+  statsModal: document.getElementById('stats-modal'),
+  statsModalBody: document.getElementById('stats-modal-body'),
+  statsModalClose: document.getElementById('stats-modal-close')
 };
 
 // Connect to background script
@@ -1046,4 +1062,425 @@ elements.exportMenu.querySelectorAll('.export-menu-item').forEach(item => {
     const exportType = item.dataset.export;
     handleExport(exportType);
   });
+});
+
+// ============================================
+// Message Search Functionality
+// ============================================
+
+// Escape special regex characters
+function escapeRegex(string) {
+  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// Highlight search matches in text
+function highlightSearchMatches(text, query) {
+  if (!query) return escapeHtml(text);
+
+  const escapedQuery = escapeRegex(query);
+  const regex = new RegExp(`(${escapedQuery})`, 'gi');
+  const escaped = escapeHtml(text);
+
+  return escaped.replace(regex, '<span class="search-match">$1</span>');
+}
+
+// Apply search to messages
+function searchMessages(messages, query) {
+  if (!query) return messages;
+
+  const lowerQuery = query.toLowerCase();
+  return messages.filter(msg => {
+    // Search in event type
+    if (msg.eventType.toLowerCase().includes(lowerQuery)) {
+      return true;
+    }
+
+    // Search in data
+    if (msg.data.toLowerCase().includes(lowerQuery)) {
+      return true;
+    }
+
+    // Search in lastEventId
+    if (msg.lastEventId && msg.lastEventId.toLowerCase().includes(lowerQuery)) {
+      return true;
+    }
+
+    return false;
+  });
+}
+
+// Update renderMessageList to support search
+const originalRenderMessageList = renderMessageList;
+renderMessageList = function() {
+  const connection = state.connections[state.selectedConnectionId];
+
+  if (!connection || connection.messages.length === 0) {
+    elements.messageTbody.innerHTML = '';
+    elements.messageEmpty.style.display = 'flex';
+    elements.messageTbody.parentElement.style.display = 'none';
+    return;
+  }
+
+  elements.messageEmpty.style.display = 'none';
+  elements.messageTbody.parentElement.style.display = 'flex';
+
+  // Apply filters
+  let filteredMessages = filterMessages(connection.messages);
+
+  // Apply search
+  filteredMessages = searchMessages(filteredMessages, state.searchQuery);
+
+  // Update filter stats
+  updateFilterStats(filteredMessages.length, connection.messages.length);
+
+  elements.messageTbody.innerHTML = filteredMessages.map(msg => {
+    const time = formatTime(msg.timestamp);
+    const hasSearch = state.searchQuery.length > 0;
+
+    return `
+      <div class="message-row ${hasSearch ? 'search-highlight' : ''}" data-id="${msg.id}">
+        <div class="message-cell col-id">${msg.id}</div>
+        <div class="message-cell col-type">${hasSearch ? highlightSearchMatches(msg.eventType, state.searchQuery) : escapeHtml(msg.eventType)}</div>
+        <div class="message-cell col-data">${hasSearch ? highlightSearchMatches(msg.data, state.searchQuery) : escapeHtml(msg.data)}</div>
+        <div class="message-cell col-time">${time}</div>
+      </div>
+    `;
+  }).join('');
+
+  // Add click handlers
+  elements.messageTbody.querySelectorAll('.message-row').forEach(row => {
+    row.addEventListener('click', () => {
+      showMessageDetail(parseInt(row.dataset.id));
+    });
+  });
+
+  // Update filter UI if filters exist
+  if (state.messageFilters.length > 0) {
+    renderFilterConditions();
+  }
+};
+
+// Message search event listeners
+elements.messageSearchInput.addEventListener('input', (e) => {
+  state.searchQuery = e.target.value;
+  elements.btnClearSearch.style.display = state.searchQuery ? 'block' : 'none';
+  renderMessageList();
+});
+
+elements.btnClearSearch.addEventListener('click', () => {
+  state.searchQuery = '';
+  elements.messageSearchInput.value = '';
+  elements.btnClearSearch.style.display = 'none';
+  renderMessageList();
+});
+
+// ============================================
+// Filter Preset Management
+// ============================================
+
+const PRESETS_STORAGE_KEY = 'stream-panel-filter-presets';
+
+// Load presets from storage
+function loadPresets() {
+  const stored = localStorage.getItem(PRESETS_STORAGE_KEY);
+  return stored ? JSON.parse(stored) : [];
+}
+
+// Save presets to storage
+function savePresetsToStorage(presets) {
+  localStorage.setItem(PRESETS_STORAGE_KEY, JSON.stringify(presets));
+}
+
+// Show save preset modal
+function showSavePresetModal() {
+  if (state.pendingFilters.length === 0) {
+    alert('请先添加筛选条件');
+    return;
+  }
+
+  elements.presetModalTitle.textContent = '保存筛选预设';
+  elements.presetModalBody.innerHTML = `
+    <div class="preset-form">
+      <div class="form-group">
+        <label class="form-label">预设名称</label>
+        <input type="text" id="preset-name-input" class="form-input" placeholder="输入预设名称..." autofocus>
+      </div>
+      <div class="form-group">
+        <label class="form-label">描述（可选）</label>
+        <input type="text" id="preset-desc-input" class="form-input" placeholder="输入预设描述...">
+      </div>
+      <div class="form-group">
+        <label class="form-label">筛选条件预览</label>
+        <div style="font-size: 11px; color: var(--text-secondary); padding: 8px; background: var(--bg-secondary); border-radius: 4px;">
+          ${state.pendingFilters.map(f => `${f.field} ${f.mode === 'equals' ? '=' : '包含'} "${f.value}"`).join(' AND ')}
+        </div>
+      </div>
+    </div>
+  `;
+
+  elements.presetModalFooter.innerHTML = `
+    <button class="modal-btn" id="preset-cancel-btn">取消</button>
+    <button class="modal-btn primary" id="preset-save-btn">保存</button>
+  `;
+
+  elements.presetModal.style.display = 'flex';
+
+  // Event listeners
+  document.getElementById('preset-cancel-btn').addEventListener('click', closePresetModal);
+  document.getElementById('preset-save-btn').addEventListener('click', () => {
+    const name = document.getElementById('preset-name-input').value.trim();
+    const description = document.getElementById('preset-desc-input').value.trim();
+
+    if (!name) {
+      alert('请输入预设名称');
+      return;
+    }
+
+    const presets = loadPresets();
+    presets.push({
+      id: Date.now().toString(),
+      name,
+      description,
+      filters: JSON.parse(JSON.stringify(state.pendingFilters)),
+      createdAt: new Date().toISOString()
+    });
+
+    savePresetsToStorage(presets);
+    closePresetModal();
+    alert('预设保存成功');
+  });
+
+  // Allow Enter key to save
+  document.getElementById('preset-name-input').addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') {
+      document.getElementById('preset-save-btn').click();
+    }
+  });
+}
+
+// Show load preset modal
+function showLoadPresetModal() {
+  const presets = loadPresets();
+
+  if (presets.length === 0) {
+    alert('暂无已保存的预设');
+    return;
+  }
+
+  elements.presetModalTitle.textContent = '加载筛选预设';
+  elements.presetModalBody.innerHTML = `
+    <div class="preset-list">
+      ${presets.map(preset => `
+        <div class="preset-item" data-preset-id="${preset.id}">
+          <div class="preset-info">
+            <div class="preset-name">${escapeHtml(preset.name)}</div>
+            <div class="preset-description">
+              ${preset.description ? escapeHtml(preset.description) : ''}
+              <br>
+              <span style="font-size: 10px; color: var(--text-muted);">
+                ${preset.filters.map(f => `${f.field} ${f.mode === 'equals' ? '=' : '包含'} "${f.value}"`).join(', ')}
+              </span>
+            </div>
+          </div>
+          <div class="preset-actions">
+            <button class="preset-btn load-preset-btn" data-preset-id="${preset.id}">加载</button>
+            <button class="preset-btn delete-preset-btn" data-preset-id="${preset.id}">删除</button>
+          </div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+
+  elements.presetModalFooter.innerHTML = `
+    <button class="modal-btn" id="preset-close-btn">关闭</button>
+  `;
+
+  elements.presetModal.style.display = 'flex';
+
+  // Event listeners
+  document.getElementById('preset-close-btn').addEventListener('click', closePresetModal);
+
+  document.querySelectorAll('.load-preset-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const presetId = btn.dataset.presetId;
+      const preset = presets.find(p => p.id === presetId);
+      if (preset) {
+        state.pendingFilters = JSON.parse(JSON.stringify(preset.filters));
+        state.messageFilters = JSON.parse(JSON.stringify(preset.filters));
+        elements.messageFilterContainer.style.display = 'block';
+        elements.btnToggleFilter.classList.add('expanded');
+        renderFilterConditions();
+        renderMessageList();
+        closePresetModal();
+      }
+    });
+  });
+
+  document.querySelectorAll('.delete-preset-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (confirm('确定要删除此预设吗？')) {
+        const presetId = btn.dataset.presetId;
+        const updatedPresets = presets.filter(p => p.id !== presetId);
+        savePresetsToStorage(updatedPresets);
+        showLoadPresetModal(); // Refresh the list
+      }
+    });
+  });
+}
+
+// Close preset modal
+function closePresetModal() {
+  elements.presetModal.style.display = 'none';
+}
+
+// Preset event listeners
+elements.btnSavePreset.addEventListener('click', showSavePresetModal);
+elements.btnLoadPreset.addEventListener('click', showLoadPresetModal);
+elements.presetModalClose.addEventListener('click', closePresetModal);
+
+// Close modal when clicking outside
+elements.presetModal.addEventListener('click', (e) => {
+  if (e.target === elements.presetModal) {
+    closePresetModal();
+  }
+});
+
+// ============================================
+// Message Replay Functionality
+// ============================================
+
+elements.btnReplay.addEventListener('click', () => {
+  const connection = state.connections[state.selectedConnectionId];
+  if (!connection) return;
+
+  const message = connection.messages.find(m => m.id === state.selectedMessageId);
+  if (!message) return;
+
+  // Create replay data structure
+  const replayData = {
+    url: connection.url,
+    eventType: message.eventType,
+    data: message.data,
+    lastEventId: message.lastEventId,
+    timestamp: message.timestamp,
+    instruction: '此消息已复制到剪贴板。要重放此消息，您需要手动模拟相应的SSE事件。'
+  };
+
+  const replayText = JSON.stringify(replayData, null, 2);
+  copyToClipboard(replayText);
+
+  alert('消息重放数据已复制到剪贴板！\n\n包含内容：\n- 连接URL\n- 事件类型\n- 消息数据\n- 时间戳');
+});
+
+// ============================================
+// Connection Statistics
+// ============================================
+
+// Calculate statistics
+function calculateStatistics() {
+  const connections = Object.values(state.connections);
+  const totalConnections = connections.length;
+  const activeConnections = connections.filter(c => c.status === 'open').length;
+  const totalMessages = connections.reduce((sum, c) => sum + c.messages.length, 0);
+  const avgMessages = totalConnections > 0 ? Math.round(totalMessages / totalConnections) : 0;
+
+  return {
+    totalConnections,
+    activeConnections,
+    totalMessages,
+    avgMessages,
+    connections: connections.map(conn => ({
+      id: conn.id,
+      url: conn.url,
+      status: conn.status,
+      messageCount: conn.messages.length,
+      createdAt: conn.createdAt,
+      duration: Date.now() - conn.createdAt
+    }))
+  };
+}
+
+// Format duration
+function formatDuration(ms) {
+  const seconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(seconds / 60);
+  const hours = Math.floor(minutes / 60);
+
+  if (hours > 0) {
+    return `${hours}h ${minutes % 60}m`;
+  } else if (minutes > 0) {
+    return `${minutes}m ${seconds % 60}s`;
+  } else {
+    return `${seconds}s`;
+  }
+}
+
+// Show statistics modal
+function showStatisticsModal() {
+  const stats = calculateStatistics();
+
+  // Update summary statistics
+  document.getElementById('stat-total-connections').textContent = stats.totalConnections;
+  document.getElementById('stat-active-connections').textContent = stats.activeConnections;
+  document.getElementById('stat-total-messages').textContent = stats.totalMessages;
+  document.getElementById('stat-avg-messages').textContent = stats.avgMessages;
+
+  // Render connection list
+  const statsConnectionList = document.getElementById('stats-connection-list');
+
+  if (stats.connections.length === 0) {
+    statsConnectionList.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 20px;">暂无连接数据</div>';
+  } else {
+    statsConnectionList.innerHTML = stats.connections.map(conn => `
+      <div class="stats-connection-item">
+        <div class="stats-connection-header">
+          <div class="stats-connection-url" title="${escapeHtml(conn.url)}">${escapeHtml(getUrlPath(conn.url))}</div>
+          <span class="stats-connection-status status-${conn.status}">${getStatusText(conn.status)}</span>
+        </div>
+        <div class="stats-connection-details">
+          <div class="stats-detail-item">
+            <span class="stats-detail-label">消息数</span>
+            <span class="stats-detail-value">${conn.messageCount}</span>
+          </div>
+          <div class="stats-detail-item">
+            <span class="stats-detail-label">持续时间</span>
+            <span class="stats-detail-value">${formatDuration(conn.duration)}</span>
+          </div>
+          <div class="stats-detail-item">
+            <span class="stats-detail-label">ID</span>
+            <span class="stats-detail-value">${conn.id.substring(0, 8)}...</span>
+          </div>
+        </div>
+      </div>
+    `).join('');
+  }
+
+  elements.statsModal.style.display = 'flex';
+}
+
+// Get status text
+function getStatusText(status) {
+  const statusMap = {
+    'connecting': '连接中',
+    'open': '已连接',
+    'closed': '已关闭',
+    'error': '错误'
+  };
+  return statusMap[status] || status;
+}
+
+// Close statistics modal
+function closeStatisticsModal() {
+  elements.statsModal.style.display = 'none';
+}
+
+// Statistics event listeners
+elements.btnStats.addEventListener('click', showStatisticsModal);
+elements.statsModalClose.addEventListener('click', closeStatisticsModal);
+
+// Close modal when clicking outside
+elements.statsModal.addEventListener('click', (e) => {
+  if (e.target === elements.statsModal) {
+    closeStatisticsModal();
+  }
 });
