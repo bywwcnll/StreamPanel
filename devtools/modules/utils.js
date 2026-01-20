@@ -12,22 +12,34 @@ export function escapeHtml(str) {
   return div.innerHTML;
 }
 
-export function copyToClipboard(text) {
+export async function copyToClipboard(text) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch (err) {
+    console.warn('Clipboard API failed, falling back to execCommand:', err);
+  }
+
   const textarea = document.createElement('textarea');
   textarea.value = text;
   textarea.style.position = 'fixed';
   textarea.style.left = '-9999px';
   textarea.style.top = '-9999px';
+  textarea.style.opacity = '0';
   document.body.appendChild(textarea);
   textarea.select();
 
   try {
-    document.execCommand('copy');
+    const successful = document.execCommand('copy');
+    document.body.removeChild(textarea);
+    return successful;
   } catch (err) {
     console.error('Failed to copy:', err);
+    document.body.removeChild(textarea);
+    return false;
   }
-
-  document.body.removeChild(textarea);
 }
 
 export function formatTime(timestamp) {

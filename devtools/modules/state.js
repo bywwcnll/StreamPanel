@@ -4,11 +4,13 @@ export const state = {
   connections: {},
   selectedConnectionId: null,
   selectedMessageId: null,
+  pinnedMessageIds: {},
   filter: '',
   requestTypeFilter: 'all',
   messageFilters: [],
   pendingFilters: [],
-  searchQuery: ''
+  searchQuery: '',
+  autoScrollToBottom: true
 };
 
 export function setSelectedConnection(connectionId) {
@@ -45,6 +47,29 @@ export function setPendingFilters(filters) {
 
 export function setSearchQuery(query) {
   state.searchQuery = query;
+}
+
+export function setAutoScrollToBottom(enabled) {
+  state.autoScrollToBottom = enabled;
+}
+
+export function togglePinnedMessage(connectionId, messageId) {
+  if (!state.pinnedMessageIds[connectionId]) {
+    state.pinnedMessageIds[connectionId] = new Set();
+  }
+
+  const pinned = state.pinnedMessageIds[connectionId];
+  if (pinned.has(messageId)) {
+    pinned.delete(messageId);
+    return false;
+  } else {
+    pinned.add(messageId);
+    return true;
+  }
+}
+
+export function isMessagePinned(connectionId, messageId) {
+  return state.pinnedMessageIds[connectionId]?.has(messageId) || false;
 }
 
 export function clearAllData() {

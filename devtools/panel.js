@@ -1,6 +1,6 @@
 // Main panel entry point
 import { initConnectionManager, handleStreamEvent, renderConnectionList, setCallbacks as setConnectionCallbacks } from './modules/connectionManager.js';
-import { initMessageRenderer, renderMessageList, showMessageDetail, updateFilterStats, setCallbacks as setMessageRendererCallbacks } from './modules/messageRenderer.js';
+import { initMessageRenderer, renderMessageList, showMessageDetail, updateFilterStats, updatePinButtonState, setCallbacks as setMessageRendererCallbacks } from './modules/messageRenderer.js';
 import { initViewManager, showListView, showDetailView } from './modules/viewManager.js';
 import { initFilterManager, renderFilterConditions, addFilterCondition, clearAllFilters, applyFilters, filterMessages, toggleFilterContainer, setCallbacks as setFilterManagerCallbacks } from './modules/filterManager.js';
 import { initPresetManager, closePresetModal, showSavePresetModal, showLoadPresetModal, setCallbacks as setPresetManagerCallbacks } from './modules/presetManager.js';
@@ -27,7 +27,7 @@ const elements = {
   btnClear: document.getElementById('btn-clear'),
   btnBack: document.getElementById('btn-back'),
   btnCopy: document.getElementById('btn-copy'),
-  btnReplay: document.getElementById('btn-replay'),
+  btnPin: document.getElementById('btn-pin'),
   btnStats: document.getElementById('btn-stats'),
   filterInput: document.getElementById('filter-input'),
   requestTypeFilter: document.getElementById('request-type-filter'),
@@ -38,6 +38,8 @@ const elements = {
   btnApplyFilters: document.getElementById('btn-apply-filters'),
   btnClearFilters: document.getElementById('btn-clear-filters'),
   btnToggleFilter: document.getElementById('btn-toggle-filter'),
+  btnScrollTop: document.getElementById('btn-scroll-top'),
+  btnAutoScroll: document.getElementById('btn-auto-scroll'),
   btnSavePreset: document.getElementById('btn-save-preset'),
   btnLoadPreset: document.getElementById('btn-load-preset'),
   messageSearchInput: document.getElementById('message-search-input'),
@@ -130,7 +132,8 @@ function setupModuleCallbacks() {
     showLoadPresetModal,
     closePresetModal,
     showStatisticsModal,
-    closeStatisticsModal
+    closeStatisticsModal,
+    updatePinButtonState
   });
 
   // Filter manager callbacks

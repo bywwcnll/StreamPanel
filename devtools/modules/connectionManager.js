@@ -107,7 +107,7 @@ export function handleStreamEvent(payload) {
         messages: []
       });
       log('Created connection:', payload.connectionId, payload.url);
-      renderConnectionList();
+      selectConnection(payload.connectionId);
       break;
 
     case 'stream-open':

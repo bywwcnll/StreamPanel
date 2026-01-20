@@ -86,6 +86,41 @@ html, body {
   transform: rotate(180deg);
 }
 
+.auto-scroll-btn {
+  padding: 4px 6px;
+  position: relative;
+}
+
+.scroll-top-btn {
+  padding: 4px 6px;
+  position: relative;
+}
+
+.scroll-top-btn:hover {
+  color: var(--accent-color);
+}
+
+.auto-scroll-btn.active {
+  color: var(--accent-color);
+}
+
+.auto-scroll-btn.active::after {
+  content: '';
+  position: absolute;
+  bottom: 2px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 12px;
+  height: 2px;
+  background-color: var(--accent-color);
+  border-radius: 1px;
+}
+
+#btn-pin.active {
+  color: var(--accent-color);
+  font-weight: 600;
+}
+
 .toolbar-separator {
   width: 1px;
   height: 16px;
@@ -307,6 +342,7 @@ html, body {
   display: flex;
   width: 100%;
   border-bottom: 1px solid var(--border-color);
+  position: relative;
 }
 
 .message-header {
@@ -339,6 +375,7 @@ html, body {
   text-overflow: ellipsis;
   white-space: nowrap;
   flex-shrink: 0;
+  box-sizing: border-box;
 }
 
 .message-cell:last-child {
@@ -355,6 +392,29 @@ html, body {
 
 .message-body .message-row.selected {
   background-color: var(--bg-selected);
+}
+
+.message-body .message-row.pinned {
+  background: linear-gradient(to right, rgba(138, 180, 248, 0.5), rgba(138, 180, 248, 0.05));
+}
+
+.message-body .message-row.pinned::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background-color: var(--accent-color);
+}
+
+.message-body .message-row.pinned:hover {
+  background: linear-gradient(to right, rgba(138, 180, 248, 0.15), rgba(138, 180, 248, 0.08));
+}
+
+.message-body .message-row.pinned .col-id {
+  font-weight: 600;
+  color: var(--accent-color);
 }
 
 /* Column resizer */

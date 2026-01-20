@@ -1,6 +1,6 @@
 // Event handlers module
 
-import { state, setFilter, setRequestTypeFilter, setSearchQuery, clearAllData } from './state.js';
+import { state, setFilter, setRequestTypeFilter, setSearchQuery, clearAllData, setAutoScrollToBottom, togglePinnedMessage } from './state.js';
 import { showListView, showDetailView } from './viewManager.js';
 import { copyToClipboard, log } from './utils.js';
 
@@ -58,6 +58,19 @@ function setupToolbarHandlers() {
 
   elements.btnToggleFilter.addEventListener('click', () => {
     if (callbacks.toggleFilterContainer) callbacks.toggleFilterContainer();
+  });
+
+  elements.btnScrollTop.addEventListener('click', () => {
+    elements.messageTbody.scrollTop = 0;
+  });
+
+  elements.btnAutoScroll.addEventListener('click', () => {
+    const newState = !state.autoScrollToBottom;
+    setAutoScrollToBottom(newState);
+    elements.btnAutoScroll.classList.toggle('active', newState);
+    if (newState) {
+      elements.messageTbody.scrollTop = elements.messageTbody.scrollHeight;
+    }
   });
 }
 
@@ -124,36 +137,29 @@ function setupDetailHandlers() {
     showListView();
   });
 
-  elements.btnCopy.addEventListener('click', () => {
+  elements.btnCopy.addEventListener('click', async () => {
     const connection = state.connections[state.selectedConnectionId];
     if (!connection) return;
 
     const message = connection.messages.find(m => m.id === state.selectedMessageId);
     if (!message) return;
 
-    copyToClipboard(message.data);
+    const success = await copyToClipboard(message.data);
+    if (success) {
+      alert('消息数据已复制到剪贴板！');
+    } else {
+      alert('复制失败，请重试。');
+    }
   });
 
-  elements.btnReplay.addEventListener('click', () => {
-    const connection = state.connections[state.selectedConnectionId];
-    if (!connection) return;
-
-    const message = connection.messages.find(m => m.id === state.selectedMessageId);
-    if (!message) return;
-
-    const replayData = {
-      url: connection.url,
-      eventType: message.eventType,
-      data: message.data,
-      lastEventId: message.lastEventId,
-      timestamp: message.timestamp,
-      instruction: '此消息已复制到剪贴板。要重放此消息，您需要手动模拟相应的SSE事件。'
-    };
-
-    const replayText = JSON.stringify(replayData, null, 2);
-    copyToClipboard(replayText);
-
-    alert('消息重放数据已复制到剪贴板！\n\n包含内容：\n- 连接URL\n- 事件类型\n- 消息数据\n- 时间戳');
+  elements.btnPin.addEventListener('click', () => {
+    const isPinned = togglePinnedMessage(state.selectedConnectionId, state.selectedMessageId);
+    if (callbacks.updatePinButtonState) {
+      callbacks.updatePinButtonState();
+    }
+    if (callbacks.renderMessageList) {
+      callbacks.renderMessageList();
+    }
   });
 }
 

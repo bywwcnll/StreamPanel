@@ -1,6 +1,6 @@
 // Message rendering module
 
-import { state } from './state.js';
+import { state, isMessagePinned } from './state.js';
 import { escapeHtml, formatTime, syntaxHighlight, log } from './utils.js';
 import { showDetailView, showListView } from './viewManager.js';
 
@@ -41,13 +41,18 @@ export function renderMessageList() {
 
   updateFilterStats(filteredMessages.length, connection.messages.length);
 
-  elements.messageTbody.innerHTML = filteredMessages.map(msg => {
+  const pinnedMessages = filteredMessages.filter(msg => isMessagePinned(state.selectedConnectionId, msg.id));
+  const normalMessages = filteredMessages.filter(msg => !isMessagePinned(state.selectedConnectionId, msg.id));
+  const displayMessages = [...pinnedMessages, ...normalMessages];
+
+  elements.messageTbody.innerHTML = displayMessages.map(msg => {
     const time = formatTime(msg.timestamp);
     const hasSearch = state.searchQuery.length > 0;
+    const isPinned = isMessagePinned(state.selectedConnectionId, msg.id);
 
     return `
-      <div class="message-row ${hasSearch ? 'search-highlight' : ''}" data-id="${msg.id}">
-        <div class="message-cell col-id">${msg.id}</div>
+      <div class="message-row ${hasSearch ? 'search-highlight' : ''} ${isPinned ? 'pinned' : ''}" data-id="${msg.id}">
+        <div class="message-cell col-id">${isPinned ? '📌' : ''}${msg.id}</div>
         <div class="message-cell col-type">${hasSearch ? highlightSearchMatches(msg.eventType, state.searchQuery) : escapeHtml(msg.eventType)}</div>
         <div class="message-cell col-data">${hasSearch ? highlightSearchMatches(msg.data, state.searchQuery) : escapeHtml(msg.data)}</div>
         <div class="message-cell col-time">${time}</div>
@@ -60,6 +65,10 @@ export function renderMessageList() {
       showMessageDetail(parseInt(row.dataset.id));
     });
   });
+
+  if (state.autoScrollToBottom) {
+    elements.messageTbody.scrollTop = elements.messageTbody.scrollHeight;
+  }
 }
 
 export function showMessageDetail(messageId) {
@@ -82,7 +91,14 @@ export function showMessageDetail(messageId) {
   }
 
   elements.detailJson.innerHTML = formattedData;
+  updatePinButtonState();
   showDetailView();
+}
+
+export function updatePinButtonState() {
+  const isPinned = isMessagePinned(state.selectedConnectionId, state.selectedMessageId);
+  elements.btnPin.classList.toggle('active', isPinned);
+  elements.btnPin.title = isPinned ? '取消置顶此消息' : '置顶此消息';
 }
 
 export function updateFilterStats(filteredCount, totalCount) {

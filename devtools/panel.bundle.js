@@ -7,11 +7,13 @@
     connections: {},
     selectedConnectionId: null,
     selectedMessageId: null,
+    pinnedMessageIds: {},
     filter: '',
     requestTypeFilter: 'all',
     messageFilters: [],
     pendingFilters: [],
-    searchQuery: ''
+    searchQuery: '',
+    autoScrollToBottom: true
   };
 
   function setFilter(filter) {
@@ -24,6 +26,29 @@
 
   function setSearchQuery(query) {
     state.searchQuery = query;
+  }
+
+  function setAutoScrollToBottom(enabled) {
+    state.autoScrollToBottom = enabled;
+  }
+
+  function togglePinnedMessage(connectionId, messageId) {
+    if (!state.pinnedMessageIds[connectionId]) {
+      state.pinnedMessageIds[connectionId] = new Set();
+    }
+
+    const pinned = state.pinnedMessageIds[connectionId];
+    if (pinned.has(messageId)) {
+      pinned.delete(messageId);
+      return false;
+    } else {
+      pinned.add(messageId);
+      return true;
+    }
+  }
+
+  function isMessagePinned(connectionId, messageId) {
+    return state.pinnedMessageIds[connectionId]?.has(messageId) || false;
   }
 
   function clearAllData() {
@@ -46,22 +71,34 @@
     return div.innerHTML;
   }
 
-  function copyToClipboard(text) {
+  async function copyToClipboard(text) {
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+        return true;
+      }
+    } catch (err) {
+      console.warn('Clipboard API failed, falling back to execCommand:', err);
+    }
+
     const textarea = document.createElement('textarea');
     textarea.value = text;
     textarea.style.position = 'fixed';
     textarea.style.left = '-9999px';
     textarea.style.top = '-9999px';
+    textarea.style.opacity = '0';
     document.body.appendChild(textarea);
     textarea.select();
 
     try {
-      document.execCommand('copy');
+      const successful = document.execCommand('copy');
+      document.body.removeChild(textarea);
+      return successful;
     } catch (err) {
       console.error('Failed to copy:', err);
+      document.body.removeChild(textarea);
+      return false;
     }
-
-    document.body.removeChild(textarea);
   }
 
   function formatTime(timestamp) {
@@ -271,7 +308,7 @@
           messages: []
         });
         log('Created connection:', payload.connectionId, payload.url);
-        renderConnectionList();
+        selectConnection(payload.connectionId);
         break;
 
       case 'stream-open':
@@ -394,13 +431,18 @@
 
     updateFilterStats(filteredMessages.length, connection.messages.length);
 
-    elements$5.messageTbody.innerHTML = filteredMessages.map(msg => {
+    const pinnedMessages = filteredMessages.filter(msg => isMessagePinned(state.selectedConnectionId, msg.id));
+    const normalMessages = filteredMessages.filter(msg => !isMessagePinned(state.selectedConnectionId, msg.id));
+    const displayMessages = [...pinnedMessages, ...normalMessages];
+
+    elements$5.messageTbody.innerHTML = displayMessages.map(msg => {
       const time = formatTime(msg.timestamp);
       const hasSearch = state.searchQuery.length > 0;
+      const isPinned = isMessagePinned(state.selectedConnectionId, msg.id);
 
       return `
-      <div class="message-row ${hasSearch ? 'search-highlight' : ''}" data-id="${msg.id}">
-        <div class="message-cell col-id">${msg.id}</div>
+      <div class="message-row ${hasSearch ? 'search-highlight' : ''} ${isPinned ? 'pinned' : ''}" data-id="${msg.id}">
+        <div class="message-cell col-id">${isPinned ? '📌' : ''}${msg.id}</div>
         <div class="message-cell col-type">${hasSearch ? highlightSearchMatches(msg.eventType, state.searchQuery) : escapeHtml(msg.eventType)}</div>
         <div class="message-cell col-data">${hasSearch ? highlightSearchMatches(msg.data, state.searchQuery) : escapeHtml(msg.data)}</div>
         <div class="message-cell col-time">${time}</div>
@@ -413,6 +455,10 @@
         showMessageDetail(parseInt(row.dataset.id));
       });
     });
+
+    if (state.autoScrollToBottom) {
+      elements$5.messageTbody.scrollTop = elements$5.messageTbody.scrollHeight;
+    }
   }
 
   function showMessageDetail(messageId) {
@@ -435,7 +481,14 @@
     }
 
     elements$5.detailJson.innerHTML = formattedData;
+    updatePinButtonState();
     showDetailView();
+  }
+
+  function updatePinButtonState() {
+    const isPinned = isMessagePinned(state.selectedConnectionId, state.selectedMessageId);
+    elements$5.btnPin.classList.toggle('active', isPinned);
+    elements$5.btnPin.title = isPinned ? '取消置顶此消息' : '置顶此消息';
   }
 
   function updateFilterStats(filteredCount, totalCount) {
@@ -1036,6 +1089,19 @@
     elements$1.btnToggleFilter.addEventListener('click', () => {
       if (callbacks.toggleFilterContainer) callbacks.toggleFilterContainer();
     });
+
+    elements$1.btnScrollTop.addEventListener('click', () => {
+      elements$1.messageTbody.scrollTop = 0;
+    });
+
+    elements$1.btnAutoScroll.addEventListener('click', () => {
+      const newState = !state.autoScrollToBottom;
+      setAutoScrollToBottom(newState);
+      elements$1.btnAutoScroll.classList.toggle('active', newState);
+      if (newState) {
+        elements$1.messageTbody.scrollTop = elements$1.messageTbody.scrollHeight;
+      }
+    });
   }
 
   function setupFilterHandlers() {
@@ -1101,36 +1167,29 @@
       showListView();
     });
 
-    elements$1.btnCopy.addEventListener('click', () => {
+    elements$1.btnCopy.addEventListener('click', async () => {
       const connection = state.connections[state.selectedConnectionId];
       if (!connection) return;
 
       const message = connection.messages.find(m => m.id === state.selectedMessageId);
       if (!message) return;
 
-      copyToClipboard(message.data);
+      const success = await copyToClipboard(message.data);
+      if (success) {
+        alert('消息数据已复制到剪贴板！');
+      } else {
+        alert('复制失败，请重试。');
+      }
     });
 
-    elements$1.btnReplay.addEventListener('click', () => {
-      const connection = state.connections[state.selectedConnectionId];
-      if (!connection) return;
-
-      const message = connection.messages.find(m => m.id === state.selectedMessageId);
-      if (!message) return;
-
-      const replayData = {
-        url: connection.url,
-        eventType: message.eventType,
-        data: message.data,
-        lastEventId: message.lastEventId,
-        timestamp: message.timestamp,
-        instruction: '此消息已复制到剪贴板。要重放此消息，您需要手动模拟相应的SSE事件。'
-      };
-
-      const replayText = JSON.stringify(replayData, null, 2);
-      copyToClipboard(replayText);
-
-      alert('消息重放数据已复制到剪贴板！\n\n包含内容：\n- 连接URL\n- 事件类型\n- 消息数据\n- 时间戳');
+    elements$1.btnPin.addEventListener('click', () => {
+      togglePinnedMessage(state.selectedConnectionId, state.selectedMessageId);
+      if (callbacks.updatePinButtonState) {
+        callbacks.updatePinButtonState();
+      }
+      if (callbacks.renderMessageList) {
+        callbacks.renderMessageList();
+      }
     });
   }
 
@@ -1509,7 +1568,7 @@
     btnClear: document.getElementById('btn-clear'),
     btnBack: document.getElementById('btn-back'),
     btnCopy: document.getElementById('btn-copy'),
-    btnReplay: document.getElementById('btn-replay'),
+    btnPin: document.getElementById('btn-pin'),
     btnStats: document.getElementById('btn-stats'),
     filterInput: document.getElementById('filter-input'),
     requestTypeFilter: document.getElementById('request-type-filter'),
@@ -1520,6 +1579,8 @@
     btnApplyFilters: document.getElementById('btn-apply-filters'),
     btnClearFilters: document.getElementById('btn-clear-filters'),
     btnToggleFilter: document.getElementById('btn-toggle-filter'),
+    btnScrollTop: document.getElementById('btn-scroll-top'),
+    btnAutoScroll: document.getElementById('btn-auto-scroll'),
     btnSavePreset: document.getElementById('btn-save-preset'),
     btnLoadPreset: document.getElementById('btn-load-preset'),
     messageSearchInput: document.getElementById('message-search-input'),
@@ -1612,7 +1673,8 @@
       showLoadPresetModal,
       closePresetModal,
       showStatisticsModal,
-      closeStatisticsModal
+      closeStatisticsModal,
+      updatePinButtonState
     });
 
     // Filter manager callbacks
