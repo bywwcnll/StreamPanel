@@ -1,11 +1,12 @@
 // Main panel entry point
-import { initConnectionManager, handleStreamEvent, renderConnectionList, setCallbacks as setConnectionCallbacks } from './modules/connectionManager.js';
+import { initConnectionManager, handleStreamEvent, renderConnectionList, selectConnection, setCallbacks as setConnectionCallbacks } from './modules/connectionManager.js';
 import { initMessageRenderer, renderMessageList, showMessageDetail, updateFilterStats, updatePinButtonState, setCallbacks as setMessageRendererCallbacks } from './modules/messageRenderer.js';
 import { initViewManager, showListView, showDetailView } from './modules/viewManager.js';
 import { initFilterManager, renderFilterConditions, addFilterCondition, clearAllFilters, applyFilters, filterMessages, toggleFilterContainer, setCallbacks as setFilterManagerCallbacks } from './modules/filterManager.js';
 import { initPresetManager, closePresetModal, showSavePresetModal, showLoadPresetModal, setCallbacks as setPresetManagerCallbacks } from './modules/presetManager.js';
 import { initStatisticsManager, closeStatisticsModal, showStatisticsModal } from './modules/statisticsManager.js';
 import { initEventHandlers, setCallbacks as setEventHandlersCallbacks } from './modules/eventHandlers.js';
+import { initSavedConnectionsManager, closeSavedConnectionsModal, showSaveConnectionModal, showSavedConnectionsModal, deleteAllSavedConnections, setCallbacks as setSavedConnectionsCallbacks } from './modules/savedConnectionsManager.js';
 import { initColumnResizers } from './modules/columnResizer.js';
 import { state } from './modules/state.js';
 import { log } from './modules/utils.js';
@@ -54,7 +55,16 @@ const elements = {
   presetModalClose: document.getElementById('preset-modal-close'),
   statsModal: document.getElementById('stats-modal'),
   statsModalBody: document.getElementById('stats-modal-body'),
-  statsModalClose: document.getElementById('stats-modal-close')
+  statsModalClose: document.getElementById('stats-modal-close'),
+  btnSaveConnection: document.getElementById('btn-save-connection'),
+  btnSavedConnections: document.getElementById('btn-saved-connections'),
+  savedConnectionsModal: document.getElementById('saved-connections-modal'),
+  savedConnectionsModalTitle: document.getElementById('saved-connections-modal-title'),
+  savedConnectionsModalBody: document.getElementById('saved-connections-modal-body'),
+  savedConnectionsList: document.getElementById('saved-connections-list'),
+  savedConnectionsModalClose: document.getElementById('saved-connections-modal-close'),
+  btnCloseSavedModal: document.getElementById('btn-close-saved-modal'),
+  btnDeleteAllSaved: document.getElementById('btn-delete-all-saved')
 };
 
 // Connect to background script
@@ -99,6 +109,7 @@ function initModules() {
   initFilterManager(elements);
   initPresetManager(elements);
   initStatisticsManager(elements);
+  initSavedConnectionsManager(elements);
   initEventHandlers(elements, port);
   initColumnResizers();
 
@@ -133,6 +144,10 @@ function setupModuleCallbacks() {
     closePresetModal,
     showStatisticsModal,
     closeStatisticsModal,
+    showSaveConnectionModal,
+    showSavedConnectionsModal,
+    closeSavedConnectionsModal,
+    deleteAllSavedConnections,
     updatePinButtonState
   });
 
@@ -146,6 +161,13 @@ function setupModuleCallbacks() {
   setPresetManagerCallbacks({
     renderMessageList,
     renderFilterConditions
+  });
+
+  // Saved connections manager callbacks
+  setSavedConnectionsCallbacks({
+    renderConnectionList,
+    renderMessageList,
+    selectConnection
   });
 }
 

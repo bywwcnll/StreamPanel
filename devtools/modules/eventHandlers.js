@@ -27,6 +27,7 @@ export function initEventHandlers(el, connectionPort) {
   setupExportHandlers();
   setupPresetHandlers();
   setupStatsHandlers();
+  setupSavedConnectionsHandlers();
   setupDetailHandlers();
   setupResizerHandlers();
   setupSearchHandlers();
@@ -132,6 +133,24 @@ function setupStatsHandlers() {
   });
 }
 
+function setupSavedConnectionsHandlers() {
+  elements.btnSaveConnection.addEventListener('click', () => {
+    if (callbacks.showSaveConnectionModal) callbacks.showSaveConnectionModal();
+  });
+  elements.btnSavedConnections.addEventListener('click', () => {
+    if (callbacks.showSavedConnectionsModal) callbacks.showSavedConnectionsModal();
+  });
+  elements.savedConnectionsModalClose.addEventListener('click', () => {
+    if (callbacks.closeSavedConnectionsModal) callbacks.closeSavedConnectionsModal();
+  });
+  elements.btnCloseSavedModal.addEventListener('click', () => {
+    if (callbacks.closeSavedConnectionsModal) callbacks.closeSavedConnectionsModal();
+  });
+  elements.btnDeleteAllSaved.addEventListener('click', () => {
+    if (callbacks.deleteAllSavedConnections) callbacks.deleteAllSavedConnections();
+  });
+}
+
 function setupDetailHandlers() {
   elements.btnBack.addEventListener('click', () => {
     showListView();
@@ -216,6 +235,12 @@ function setupModalClickHandlers() {
   elements.statsModal.addEventListener('click', (e) => {
     if (e.target === elements.statsModal) {
       if (callbacks.closeStatisticsModal) callbacks.closeStatisticsModal();
+    }
+  });
+
+  elements.savedConnectionsModal.addEventListener('click', (e) => {
+    if (e.target === elements.savedConnectionsModal) {
+      if (callbacks.closeSavedConnectionsModal) callbacks.closeSavedConnectionsModal();
     }
   });
 }

@@ -57,6 +57,10 @@
     state.selectedMessageId = null;
   }
 
+  function addConnection$1(connectionData) {
+    state.connections[connectionData.id] = connectionData;
+  }
+
   // Utility functions module
 
   function log(...args) {
@@ -201,25 +205,194 @@
     }, 100);
   }
 
+  // Connection storage module - IndexedDB operations
+
+  const DB_NAME = 'StreamPanelDB';
+  const DB_VERSION = 1;
+  const STORE_NAME = 'savedConnections';
+
+  let db = null;
+
+  async function initDB() {
+    if (db) return db;
+
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.open(DB_NAME, DB_VERSION);
+
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        db = request.result;
+        resolve(db);
+      };
+
+      request.onupgradeneeded = (event) => {
+        try {
+          const db = event.target.result;
+          if (!db.objectStoreNames.contains(STORE_NAME)) {
+            const store = db.createObjectStore(STORE_NAME, { keyPath: 'id' });
+            store.createIndex('originalId', 'originalId', { unique: false });
+            store.createIndex('savedAt', 'savedAt', { unique: false });
+            store.createIndex('url', 'url', { unique: false });
+          }
+        } catch (upgradeError) {
+          console.error('[IndexedDB Upgrade] Error during database upgrade:', upgradeError);
+        }
+      };
+    });
+  }
+
+  async function saveConnection(connectionData, options = {}) {
+    const database = await initDB();
+    return new Promise((resolve, reject) => {
+      const transaction = database.transaction([STORE_NAME], 'readwrite');
+      const store = transaction.objectStore(STORE_NAME);
+
+      const savedData = {
+        id: options.savedId || generateSavedId(),
+        originalId: connectionData.id,
+        name: options.name || getConnectionName(connectionData),
+        url: connectionData.url,
+        frameUrl: connectionData.frameUrl || null,
+        isIframe: connectionData.isIframe || false,
+        source: connectionData.source || 'unknown',
+        status: connectionData.status,
+        createdAt: connectionData.createdAt,
+        savedAt: Date.now(),
+        messages: JSON.parse(JSON.stringify(connectionData.messages)),
+        messageCount: connectionData.messages.length
+      };
+
+      const request = store.put(savedData);
+
+      request.onsuccess = () => resolve(savedData);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async function loadConnection(savedId) {
+    const database = await initDB();
+    return new Promise((resolve, reject) => {
+      const transaction = database.transaction([STORE_NAME], 'readonly');
+      const store = transaction.objectStore(STORE_NAME);
+      const request = store.get(savedId);
+
+      request.onsuccess = () => {
+        if (request.result) {
+          resolve(request.result);
+        } else {
+          resolve(null);
+        }
+      };
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async function deleteConnection(savedId) {
+    const database = await initDB();
+    return new Promise((resolve, reject) => {
+      const transaction = database.transaction([STORE_NAME], 'readwrite');
+      const store = transaction.objectStore(STORE_NAME);
+      const request = store.delete(savedId);
+
+      request.onsuccess = () => resolve(true);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async function deleteAllConnections() {
+    const database = await initDB();
+    return new Promise((resolve, reject) => {
+      const transaction = database.transaction([STORE_NAME], 'readwrite');
+      const store = transaction.objectStore(STORE_NAME);
+      const request = store.clear();
+
+      request.onsuccess = () => resolve(true);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async function getAllSavedConnections() {
+    const database = await initDB();
+    return new Promise((resolve, reject) => {
+      const transaction = database.transaction([STORE_NAME], 'readonly');
+      const store = transaction.objectStore(STORE_NAME);
+      const request = store.getAll();
+
+      request.onsuccess = () => {
+        const connections = request.result || [];
+        connections.sort((a, b) => b.savedAt - a.savedAt);
+        resolve(connections);
+      };
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async function isConnectionSaved(originalId) {
+    const database = await initDB();
+    return new Promise((resolve, reject) => {
+      const transaction = database.transaction([STORE_NAME], 'readonly');
+      const store = transaction.objectStore(STORE_NAME);
+      const index = store.index('originalId');
+      const request = index.get(originalId);
+
+      request.onsuccess = () => {
+        resolve(!!request.result);
+      };
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async function getConnectionByOriginalId(originalId) {
+    const database = await initDB();
+    return new Promise((resolve, reject) => {
+      const transaction = database.transaction([STORE_NAME], 'readonly');
+      const store = transaction.objectStore(STORE_NAME);
+      const index = store.index('originalId');
+      const request = index.get(originalId);
+
+      request.onsuccess = () => {
+        resolve(request.result || null);
+      };
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  function generateSavedId() {
+    return `saved-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  }
+
+  function getConnectionName(connectionData) {
+    if (!connectionData.createdAt) return '未命名连接';
+
+    const date = new Date(connectionData.createdAt);
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    const seconds = String(date.getSeconds()).padStart(2, '0');
+    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+  }
+
   // Connection management module
 
 
-  let elements$7 = {};
-  let callbacks$4 = {
+  let elements$8 = {};
+  let callbacks$5 = {
     renderMessageList: null,
     showListView: null,
     renderFilterConditions: null
   };
 
   function initConnectionManager(el) {
-    elements$7 = el;
+    elements$8 = el;
   }
 
-  function setCallbacks$4(cb) {
-    callbacks$4 = { ...callbacks$4, ...cb };
+  function setCallbacks$5(cb) {
+    callbacks$5 = { ...callbacks$5, ...cb };
   }
 
-  function renderConnectionList() {
+  async function renderConnectionList() {
     const connections = Object.values(state.connections);
     const urlFilter = state.filter.toLowerCase();
     const typeFilter = state.requestTypeFilter;
@@ -238,13 +411,14 @@
     filtered.sort((a, b) => b.createdAt - a.createdAt);
 
     if (filtered.length === 0) {
-      elements$7.connectionList.innerHTML = '<div class="empty-state">暂无连接</div>';
+      elements$8.connectionList.innerHTML = '<div class="empty-state">暂无连接</div>';
       return;
     }
 
-    elements$7.connectionList.innerHTML = filtered.map(conn => {
+    const connectionHtml = await Promise.all(filtered.map(async (conn) => {
       const urlPath = getUrlPath(conn.url);
       const isSelected = conn.id === state.selectedConnectionId;
+      const isSaved = await isConnectionSaved(conn.originalId || conn.id);
       const badgeClass = conn.isIframe ? 'badge-iframe' : 'badge-main';
       const badgeText = conn.isIframe ? 'iframe' : '主页面';
       const statusClass = `status-${conn.status}`;
@@ -258,6 +432,8 @@
       const typeBadgeClass = typeBadgeMap[requestType] || 'badge-unknown';
       const typeBadgeText = requestType.toUpperCase();
 
+      const savedIndicator = isSaved ? '<span class="connection-saved-indicator" title="已保存到数据库">💾</span>' : '';
+
       return `
       <div class="connection-item ${isSelected ? 'selected' : ''}" data-id="${conn.id}">
         <div class="connection-url" title="${escapeHtml(conn.url)}">${escapeHtml(urlPath)}</div>
@@ -266,29 +442,32 @@
           <span class="connection-badge ${badgeClass}">${badgeText}</span>
           <span class="connection-badge ${typeBadgeClass}">${typeBadgeText}</span>
           <span class="message-count">${conn.messages.length} 条</span>
+          ${savedIndicator}
         </div>
       </div>
     `;
-    }).join('');
+    }));
 
-    elements$7.connectionList.querySelectorAll('.connection-item').forEach(item => {
+    elements$8.connectionList.innerHTML = connectionHtml.join('');
+
+    elements$8.connectionList.querySelectorAll('.connection-item').forEach(item => {
       item.addEventListener('click', () => {
         selectConnection(item.dataset.id);
       });
     });
   }
 
-  function selectConnection(connectionId) {
+  async function selectConnection(connectionId) {
     const isSelected = setSelectedConnection(connectionId);
 
-    renderConnectionList();
-    if (callbacks$4.renderMessageList) callbacks$4.renderMessageList();
-    if (callbacks$4.showListView) callbacks$4.showListView();
+    await renderConnectionList();
+    if (callbacks$5.renderMessageList) callbacks$5.renderMessageList();
+    if (callbacks$5.showListView) callbacks$5.showListView();
 
     if (isSelected && state.pendingFilters.length > 0) {
-      elements$7.messageFilterContainer.style.display = 'block';
-      elements$7.btnToggleFilter.classList.add('expanded');
-      if (callbacks$4.renderFilterConditions) callbacks$4.renderFilterConditions();
+      elements$8.messageFilterContainer.style.display = 'block';
+      elements$8.btnToggleFilter.classList.add('expanded');
+      if (callbacks$5.renderFilterConditions) callbacks$5.renderFilterConditions();
     }
   }
 
@@ -327,8 +506,8 @@
         });
         log('Added message #' + payload.messageId + ' to connection:', payload.connectionId);
         renderConnectionList();
-        if (state.selectedConnectionId === payload.connectionId && callbacks$4.renderMessageList) {
-          callbacks$4.renderMessageList();
+        if (state.selectedConnectionId === payload.connectionId && callbacks$5.renderMessageList) {
+          callbacks$5.renderMessageList();
         }
         break;
 
@@ -375,58 +554,58 @@
 
   // View management module
 
-  let elements$6 = {};
+  let elements$7 = {};
 
   function initViewManager(el) {
-    elements$6 = el;
+    elements$7 = el;
   }
 
   function showListView() {
-    elements$6.messageListView.classList.add('active');
-    elements$6.detailView.classList.remove('active');
+    elements$7.messageListView.classList.add('active');
+    elements$7.detailView.classList.remove('active');
   }
 
   function showDetailView() {
-    elements$6.messageListView.classList.remove('active');
-    elements$6.detailView.classList.add('active');
+    elements$7.messageListView.classList.remove('active');
+    elements$7.detailView.classList.add('active');
   }
 
   // Message rendering module
 
 
-  let elements$5 = {};
-  let callbacks$3 = {
+  let elements$6 = {};
+  let callbacks$4 = {
     filterMessages: null,
     searchMessages: null
   };
 
   function initMessageRenderer(el) {
-    elements$5 = el;
+    elements$6 = el;
   }
 
-  function setCallbacks$3(cb) {
-    callbacks$3 = { ...callbacks$3, ...cb };
+  function setCallbacks$4(cb) {
+    callbacks$4 = { ...callbacks$4, ...cb };
   }
 
   function renderMessageList() {
     const connection = state.connections[state.selectedConnectionId];
 
     if (!connection || connection.messages.length === 0) {
-      elements$5.messageTbody.innerHTML = '';
-      elements$5.messageEmpty.style.display = 'flex';
-      elements$5.messageTbody.parentElement.style.display = 'none';
+      elements$6.messageTbody.innerHTML = '';
+      elements$6.messageEmpty.style.display = 'flex';
+      elements$6.messageTbody.parentElement.style.display = 'none';
       return;
     }
 
-    elements$5.messageEmpty.style.display = 'none';
-    elements$5.messageTbody.parentElement.style.display = 'flex';
+    elements$6.messageEmpty.style.display = 'none';
+    elements$6.messageTbody.parentElement.style.display = 'flex';
 
     let filteredMessages = connection.messages;
-    if (callbacks$3.filterMessages) {
-      filteredMessages = callbacks$3.filterMessages(connection.messages);
+    if (callbacks$4.filterMessages) {
+      filteredMessages = callbacks$4.filterMessages(connection.messages);
     }
-    if (callbacks$3.searchMessages) {
-      filteredMessages = callbacks$3.searchMessages(filteredMessages, state.searchQuery);
+    if (callbacks$4.searchMessages) {
+      filteredMessages = callbacks$4.searchMessages(filteredMessages, state.searchQuery);
     }
 
     updateFilterStats(filteredMessages.length, connection.messages.length);
@@ -435,7 +614,7 @@
     const normalMessages = filteredMessages.filter(msg => !isMessagePinned(state.selectedConnectionId, msg.id));
     const displayMessages = [...pinnedMessages, ...normalMessages];
 
-    elements$5.messageTbody.innerHTML = displayMessages.map(msg => {
+    elements$6.messageTbody.innerHTML = displayMessages.map(msg => {
       const time = formatTime(msg.timestamp);
       const hasSearch = state.searchQuery.length > 0;
       const isPinned = isMessagePinned(state.selectedConnectionId, msg.id);
@@ -450,14 +629,14 @@
     `;
     }).join('');
 
-    elements$5.messageTbody.querySelectorAll('.message-row').forEach(row => {
+    elements$6.messageTbody.querySelectorAll('.message-row').forEach(row => {
       row.addEventListener('click', () => {
         showMessageDetail(parseInt(row.dataset.id));
       });
     });
 
     if (state.autoScrollToBottom) {
-      elements$5.messageTbody.scrollTop = elements$5.messageTbody.scrollHeight;
+      elements$6.messageTbody.scrollTop = elements$6.messageTbody.scrollHeight;
     }
   }
 
@@ -470,7 +649,7 @@
 
     state.selectedMessageId = messageId;
 
-    elements$5.detailTitle.textContent = `消息 #${messageId} - ${message.eventType}`;
+    elements$6.detailTitle.textContent = `消息 #${messageId} - ${message.eventType}`;
 
     let formattedData;
     try {
@@ -480,27 +659,27 @@
       formattedData = escapeHtml(message.data);
     }
 
-    elements$5.detailJson.innerHTML = formattedData;
+    elements$6.detailJson.innerHTML = formattedData;
     updatePinButtonState();
     showDetailView();
   }
 
   function updatePinButtonState() {
     const isPinned = isMessagePinned(state.selectedConnectionId, state.selectedMessageId);
-    elements$5.btnPin.classList.toggle('active', isPinned);
-    elements$5.btnPin.title = isPinned ? '取消置顶此消息' : '置顶此消息';
+    elements$6.btnPin.classList.toggle('active', isPinned);
+    elements$6.btnPin.title = isPinned ? '取消置顶此消息' : '置顶此消息';
   }
 
   function updateFilterStats(filteredCount, totalCount) {
     if (state.messageFilters.length === 0) {
-      elements$5.filterStats.textContent = '';
+      elements$6.filterStats.textContent = '';
       return;
     }
 
     if (filteredCount === totalCount) {
-      elements$5.filterStats.textContent = `显示全部 ${totalCount} 条消息`;
+      elements$6.filterStats.textContent = `显示全部 ${totalCount} 条消息`;
     } else {
-      elements$5.filterStats.textContent = `显示 ${filteredCount}/${totalCount} 条消息`;
+      elements$6.filterStats.textContent = `显示 ${filteredCount}/${totalCount} 条消息`;
     }
   }
 
@@ -521,18 +700,18 @@
   // Filter management module
 
 
-  let elements$4 = {};
-  let callbacks$2 = {
+  let elements$5 = {};
+  let callbacks$3 = {
     renderMessageList: null,
     updateFilterStats: null
   };
 
   function initFilterManager(el) {
-    elements$4 = el;
+    elements$5 = el;
   }
 
-  function setCallbacks$2(cb) {
-    callbacks$2 = { ...callbacks$2, ...cb };
+  function setCallbacks$3(cb) {
+    callbacks$3 = { ...callbacks$3, ...cb };
   }
 
   function getAvailableFields() {
@@ -645,8 +824,8 @@
       value: ''
     });
 
-    elements$4.messageFilterContainer.style.display = 'block';
-    elements$4.btnToggleFilter.classList.add('expanded');
+    elements$5.messageFilterContainer.style.display = 'block';
+    elements$5.btnToggleFilter.classList.add('expanded');
     renderFilterConditions();
   }
 
@@ -654,21 +833,21 @@
     state.pendingFilters.splice(index, 1);
     state.messageFilters = JSON.parse(JSON.stringify(state.pendingFilters));
     renderFilterConditions();
-    if (callbacks$2.renderMessageList) callbacks$2.renderMessageList();
+    if (callbacks$3.renderMessageList) callbacks$3.renderMessageList();
   }
 
   function clearAllFilters() {
     state.pendingFilters = [];
     state.messageFilters = [];
-    elements$4.messageFilterContainer.style.display = 'none';
-    elements$4.btnToggleFilter.classList.remove('expanded');
+    elements$5.messageFilterContainer.style.display = 'none';
+    elements$5.btnToggleFilter.classList.remove('expanded');
     renderFilterConditions();
-    if (callbacks$2.renderMessageList) callbacks$2.renderMessageList();
+    if (callbacks$3.renderMessageList) callbacks$3.renderMessageList();
   }
 
   function applyFilters() {
     state.messageFilters = JSON.parse(JSON.stringify(state.pendingFilters));
-    if (callbacks$2.renderMessageList) callbacks$2.renderMessageList();
+    if (callbacks$3.renderMessageList) callbacks$3.renderMessageList();
   }
 
   function updatePendingFilterCondition(index, field, mode, value) {
@@ -682,7 +861,7 @@
   function renderFilterConditions() {
     const availableFields = getAvailableFields();
 
-    elements$4.filterConditions.innerHTML = state.pendingFilters.map((filter, index) => {
+    elements$5.filterConditions.innerHTML = state.pendingFilters.map((filter, index) => {
       return `
       <div class="filter-row" data-index="${index}">
         <div class="filter-field-autocomplete" data-index="${index}">
@@ -707,7 +886,7 @@
   }
 
   function setupFilterEventListeners(availableFields) {
-    elements$4.filterConditions.querySelectorAll('.filter-field-input').forEach(input => {
+    elements$5.filterConditions.querySelectorAll('.filter-field-input').forEach(input => {
       const index = parseInt(input.dataset.index);
       const dropdown = input.parentElement.querySelector('.filter-field-dropdown');
 
@@ -750,7 +929,7 @@
       });
     });
 
-    elements$4.filterConditions.querySelectorAll('.filter-mode-select').forEach(select => {
+    elements$5.filterConditions.querySelectorAll('.filter-mode-select').forEach(select => {
       select.addEventListener('change', (e) => {
         const index = parseInt(e.target.dataset.index);
         const filter = state.pendingFilters[index];
@@ -758,7 +937,7 @@
       });
     });
 
-    elements$4.filterConditions.querySelectorAll('.filter-value-input').forEach(input => {
+    elements$5.filterConditions.querySelectorAll('.filter-value-input').forEach(input => {
       input.addEventListener('input', (e) => {
         const index = parseInt(e.target.dataset.index);
         const filter = state.pendingFilters[index];
@@ -772,7 +951,7 @@
       });
     });
 
-    elements$4.filterConditions.querySelectorAll('.filter-remove-btn').forEach(btn => {
+    elements$5.filterConditions.querySelectorAll('.filter-remove-btn').forEach(btn => {
       btn.addEventListener('click', (e) => {
         const index = parseInt(e.target.dataset.index);
         removeFilterCondition(index);
@@ -781,13 +960,13 @@
   }
 
   function toggleFilterContainer() {
-    const isHidden = elements$4.messageFilterContainer.style.display === 'none';
-    elements$4.messageFilterContainer.style.display = isHidden ? 'block' : 'none';
+    const isHidden = elements$5.messageFilterContainer.style.display === 'none';
+    elements$5.messageFilterContainer.style.display = isHidden ? 'block' : 'none';
 
     if (isHidden) {
-      elements$4.btnToggleFilter.classList.add('expanded');
+      elements$5.btnToggleFilter.classList.add('expanded');
     } else {
-      elements$4.btnToggleFilter.classList.remove('expanded');
+      elements$5.btnToggleFilter.classList.remove('expanded');
     }
   }
 
@@ -796,18 +975,18 @@
 
   const PRESETS_STORAGE_KEY = 'stream-panel-filter-presets';
 
-  let elements$3 = {};
-  let callbacks$1 = {
+  let elements$4 = {};
+  let callbacks$2 = {
     renderMessageList: null,
     renderFilterConditions: null
   };
 
   function initPresetManager(el) {
-    elements$3 = el;
+    elements$4 = el;
   }
 
-  function setCallbacks$1(cb) {
-    callbacks$1 = { ...callbacks$1, ...cb };
+  function setCallbacks$2(cb) {
+    callbacks$2 = { ...callbacks$2, ...cb };
   }
 
   function loadPresets() {
@@ -825,8 +1004,8 @@
       return;
     }
 
-    elements$3.presetModalTitle.textContent = '保存筛选预设';
-    elements$3.presetModalBody.innerHTML = `
+    elements$4.presetModalTitle.textContent = '保存筛选预设';
+    elements$4.presetModalBody.innerHTML = `
     <div class="preset-form">
       <div class="form-group">
         <label class="form-label">预设名称</label>
@@ -845,12 +1024,12 @@
     </div>
   `;
 
-    elements$3.presetModalFooter.innerHTML = `
+    elements$4.presetModalFooter.innerHTML = `
     <button class="modal-btn" id="preset-cancel-btn">取消</button>
     <button class="modal-btn primary" id="preset-save-btn">保存</button>
   `;
 
-    elements$3.presetModal.style.display = 'flex';
+    elements$4.presetModal.style.display = 'flex';
 
     document.getElementById('preset-cancel-btn').addEventListener('click', closePresetModal);
     document.getElementById('preset-save-btn').addEventListener('click', () => {
@@ -891,8 +1070,8 @@
       return;
     }
 
-    elements$3.presetModalTitle.textContent = '加载筛选预设';
-    elements$3.presetModalBody.innerHTML = `
+    elements$4.presetModalTitle.textContent = '加载筛选预设';
+    elements$4.presetModalBody.innerHTML = `
     <div class="preset-list">
       ${presets.map(preset => `
         <div class="preset-item" data-preset-id="${preset.id}">
@@ -915,11 +1094,11 @@
     </div>
   `;
 
-    elements$3.presetModalFooter.innerHTML = `
+    elements$4.presetModalFooter.innerHTML = `
     <button class="modal-btn" id="preset-close-btn">关闭</button>
   `;
 
-    elements$3.presetModal.style.display = 'flex';
+    elements$4.presetModal.style.display = 'flex';
 
     document.getElementById('preset-close-btn').addEventListener('click', closePresetModal);
 
@@ -930,10 +1109,10 @@
         if (preset) {
           state.pendingFilters = JSON.parse(JSON.stringify(preset.filters));
           state.messageFilters = JSON.parse(JSON.stringify(preset.filters));
-          elements$3.messageFilterContainer.style.display = 'block';
-          elements$3.btnToggleFilter.classList.add('expanded');
-          if (callbacks$1.renderFilterConditions) callbacks$1.renderFilterConditions();
-          if (callbacks$1.renderMessageList) callbacks$1.renderMessageList();
+          elements$4.messageFilterContainer.style.display = 'block';
+          elements$4.btnToggleFilter.classList.add('expanded');
+          if (callbacks$2.renderFilterConditions) callbacks$2.renderFilterConditions();
+          if (callbacks$2.renderMessageList) callbacks$2.renderMessageList();
           closePresetModal();
         }
       });
@@ -952,16 +1131,16 @@
   }
 
   function closePresetModal() {
-    elements$3.presetModal.style.display = 'none';
+    elements$4.presetModal.style.display = 'none';
   }
 
   // Statistics management module
 
 
-  let elements$2 = {};
+  let elements$3 = {};
 
   function initStatisticsManager(el) {
-    elements$2 = el;
+    elements$3 = el;
   }
 
   function calculateStatistics() {
@@ -1024,19 +1203,19 @@
     `).join('');
     }
 
-    elements$2.statsModal.style.display = 'flex';
+    elements$3.statsModal.style.display = 'flex';
   }
 
   function closeStatisticsModal() {
-    elements$2.statsModal.style.display = 'none';
+    elements$3.statsModal.style.display = 'none';
   }
 
   // Event handlers module
 
 
-  let elements$1 = {};
+  let elements$2 = {};
   let port$1 = null;
-  let callbacks = {
+  let callbacks$1 = {
     renderConnectionList: null,
     renderMessageList: null,
     showMessageDetail: null,
@@ -1050,124 +1229,143 @@
   };
 
   function initEventHandlers(el, connectionPort) {
-    elements$1 = el;
+    elements$2 = el;
     port$1 = connectionPort;
     setupToolbarHandlers();
     setupFilterHandlers();
     setupExportHandlers();
     setupPresetHandlers();
     setupStatsHandlers();
+    setupSavedConnectionsHandlers();
     setupDetailHandlers();
     setupResizerHandlers();
     setupSearchHandlers();
     setupModalClickHandlers();
   }
 
-  function setCallbacks(cb) {
-    callbacks = { ...callbacks, ...cb };
+  function setCallbacks$1(cb) {
+    callbacks$1 = { ...callbacks$1, ...cb };
   }
 
   function setupToolbarHandlers() {
-    elements$1.btnClear.addEventListener('click', () => {
+    elements$2.btnClear.addEventListener('click', () => {
       clearAllData();
-      if (callbacks.renderConnectionList) callbacks.renderConnectionList();
-      if (callbacks.renderMessageList) callbacks.renderMessageList();
+      if (callbacks$1.renderConnectionList) callbacks$1.renderConnectionList();
+      if (callbacks$1.renderMessageList) callbacks$1.renderMessageList();
       showListView();
       port$1.postMessage({ type: 'clear' });
     });
 
-    elements$1.filterInput.addEventListener('input', (e) => {
+    elements$2.filterInput.addEventListener('input', (e) => {
       setFilter(e.target.value);
-      if (callbacks.renderConnectionList) callbacks.renderConnectionList();
+      if (callbacks$1.renderConnectionList) callbacks$1.renderConnectionList();
     });
 
-    elements$1.requestTypeFilter.addEventListener('change', (e) => {
+    elements$2.requestTypeFilter.addEventListener('change', (e) => {
       setRequestTypeFilter(e.target.value);
-      if (callbacks.renderConnectionList) callbacks.renderConnectionList();
+      if (callbacks$1.renderConnectionList) callbacks$1.renderConnectionList();
     });
 
-    elements$1.btnToggleFilter.addEventListener('click', () => {
-      if (callbacks.toggleFilterContainer) callbacks.toggleFilterContainer();
+    elements$2.btnToggleFilter.addEventListener('click', () => {
+      if (callbacks$1.toggleFilterContainer) callbacks$1.toggleFilterContainer();
     });
 
-    elements$1.btnScrollTop.addEventListener('click', () => {
-      elements$1.messageTbody.scrollTop = 0;
+    elements$2.btnScrollTop.addEventListener('click', () => {
+      elements$2.messageTbody.scrollTop = 0;
     });
 
-    elements$1.btnAutoScroll.addEventListener('click', () => {
+    elements$2.btnAutoScroll.addEventListener('click', () => {
       const newState = !state.autoScrollToBottom;
       setAutoScrollToBottom(newState);
-      elements$1.btnAutoScroll.classList.toggle('active', newState);
+      elements$2.btnAutoScroll.classList.toggle('active', newState);
       if (newState) {
-        elements$1.messageTbody.scrollTop = elements$1.messageTbody.scrollHeight;
+        elements$2.messageTbody.scrollTop = elements$2.messageTbody.scrollHeight;
       }
     });
   }
 
   function setupFilterHandlers() {
-    elements$1.btnAddFilter.addEventListener('click', () => {
+    elements$2.btnAddFilter.addEventListener('click', () => {
       // This will be called from filterManager
       document.dispatchEvent(new CustomEvent('addFilter'));
     });
 
-    elements$1.btnApplyFilters.addEventListener('click', () => {
+    elements$2.btnApplyFilters.addEventListener('click', () => {
       document.dispatchEvent(new CustomEvent('applyFilters'));
     });
 
-    elements$1.btnClearFilters.addEventListener('click', () => {
+    elements$2.btnClearFilters.addEventListener('click', () => {
       document.dispatchEvent(new CustomEvent('clearFilters'));
     });
   }
 
   function setupExportHandlers() {
-    elements$1.btnExport.addEventListener('click', (e) => {
+    elements$2.btnExport.addEventListener('click', (e) => {
       e.stopPropagation();
-      elements$1.exportDropdown.classList.toggle('open');
+      elements$2.exportDropdown.classList.toggle('open');
     });
 
-    elements$1.exportMenu.querySelectorAll('.export-menu-item').forEach(item => {
+    elements$2.exportMenu.querySelectorAll('.export-menu-item').forEach(item => {
       item.addEventListener('click', (e) => {
         e.stopPropagation();
         const exportType = item.dataset.export;
-        if (callbacks.handleExport) callbacks.handleExport(exportType);
-        elements$1.exportDropdown.classList.remove('open');
+        if (callbacks$1.handleExport) callbacks$1.handleExport(exportType);
+        elements$2.exportDropdown.classList.remove('open');
       });
     });
 
     document.addEventListener('click', (e) => {
-      if (!elements$1.exportDropdown.contains(e.target)) {
-        elements$1.exportDropdown.classList.remove('open');
+      if (!elements$2.exportDropdown.contains(e.target)) {
+        elements$2.exportDropdown.classList.remove('open');
       }
     });
   }
 
   function setupPresetHandlers() {
-    elements$1.btnSavePreset.addEventListener('click', () => {
-      if (callbacks.showSavePresetModal) callbacks.showSavePresetModal();
+    elements$2.btnSavePreset.addEventListener('click', () => {
+      if (callbacks$1.showSavePresetModal) callbacks$1.showSavePresetModal();
     });
-    elements$1.btnLoadPreset.addEventListener('click', () => {
-      if (callbacks.showLoadPresetModal) callbacks.showLoadPresetModal();
+    elements$2.btnLoadPreset.addEventListener('click', () => {
+      if (callbacks$1.showLoadPresetModal) callbacks$1.showLoadPresetModal();
     });
-    elements$1.presetModalClose.addEventListener('click', () => {
-      if (callbacks.closePresetModal) callbacks.closePresetModal();
+    elements$2.presetModalClose.addEventListener('click', () => {
+      if (callbacks$1.closePresetModal) callbacks$1.closePresetModal();
     });
   }
 
   function setupStatsHandlers() {
-    elements$1.btnStats.addEventListener('click', () => {
-      if (callbacks.showStatisticsModal) callbacks.showStatisticsModal();
+    elements$2.btnStats.addEventListener('click', () => {
+      if (callbacks$1.showStatisticsModal) callbacks$1.showStatisticsModal();
     });
-    elements$1.statsModalClose.addEventListener('click', () => {
-      if (callbacks.closeStatisticsModal) callbacks.closeStatisticsModal();
+    elements$2.statsModalClose.addEventListener('click', () => {
+      if (callbacks$1.closeStatisticsModal) callbacks$1.closeStatisticsModal();
+    });
+  }
+
+  function setupSavedConnectionsHandlers() {
+    elements$2.btnSaveConnection.addEventListener('click', () => {
+      if (callbacks$1.showSaveConnectionModal) callbacks$1.showSaveConnectionModal();
+    });
+    elements$2.btnSavedConnections.addEventListener('click', () => {
+      if (callbacks$1.showSavedConnectionsModal) callbacks$1.showSavedConnectionsModal();
+    });
+    elements$2.savedConnectionsModalClose.addEventListener('click', () => {
+      if (callbacks$1.closeSavedConnectionsModal) callbacks$1.closeSavedConnectionsModal();
+    });
+    elements$2.btnCloseSavedModal.addEventListener('click', () => {
+      if (callbacks$1.closeSavedConnectionsModal) callbacks$1.closeSavedConnectionsModal();
+    });
+    elements$2.btnDeleteAllSaved.addEventListener('click', () => {
+      if (callbacks$1.deleteAllSavedConnections) callbacks$1.deleteAllSavedConnections();
     });
   }
 
   function setupDetailHandlers() {
-    elements$1.btnBack.addEventListener('click', () => {
+    elements$2.btnBack.addEventListener('click', () => {
       showListView();
     });
 
-    elements$1.btnCopy.addEventListener('click', async () => {
+    elements$2.btnCopy.addEventListener('click', async () => {
       const connection = state.connections[state.selectedConnectionId];
       if (!connection) return;
 
@@ -1182,13 +1380,13 @@
       }
     });
 
-    elements$1.btnPin.addEventListener('click', () => {
+    elements$2.btnPin.addEventListener('click', () => {
       togglePinnedMessage(state.selectedConnectionId, state.selectedMessageId);
-      if (callbacks.updatePinButtonState) {
-        callbacks.updatePinButtonState();
+      if (callbacks$1.updatePinButtonState) {
+        callbacks$1.updatePinButtonState();
       }
-      if (callbacks.renderMessageList) {
-        callbacks.renderMessageList();
+      if (callbacks$1.renderMessageList) {
+        callbacks$1.renderMessageList();
       }
     });
   }
@@ -1222,32 +1420,313 @@
   }
 
   function setupSearchHandlers() {
-    elements$1.messageSearchInput.addEventListener('input', (e) => {
+    elements$2.messageSearchInput.addEventListener('input', (e) => {
       setSearchQuery(e.target.value);
-      elements$1.btnClearSearch.style.display = state.searchQuery ? 'block' : 'none';
-      if (callbacks.renderMessageList) callbacks.renderMessageList();
+      elements$2.btnClearSearch.style.display = state.searchQuery ? 'block' : 'none';
+      if (callbacks$1.renderMessageList) callbacks$1.renderMessageList();
     });
 
-    elements$1.btnClearSearch.addEventListener('click', () => {
+    elements$2.btnClearSearch.addEventListener('click', () => {
       setSearchQuery('');
-      elements$1.messageSearchInput.value = '';
-      elements$1.btnClearSearch.style.display = 'none';
-      if (callbacks.renderMessageList) callbacks.renderMessageList();
+      elements$2.messageSearchInput.value = '';
+      elements$2.btnClearSearch.style.display = 'none';
+      if (callbacks$1.renderMessageList) callbacks$1.renderMessageList();
     });
   }
 
   function setupModalClickHandlers() {
-    elements$1.presetModal.addEventListener('click', (e) => {
-      if (e.target === elements$1.presetModal) {
-        if (callbacks.closePresetModal) callbacks.closePresetModal();
+    elements$2.presetModal.addEventListener('click', (e) => {
+      if (e.target === elements$2.presetModal) {
+        if (callbacks$1.closePresetModal) callbacks$1.closePresetModal();
       }
     });
 
-    elements$1.statsModal.addEventListener('click', (e) => {
-      if (e.target === elements$1.statsModal) {
-        if (callbacks.closeStatisticsModal) callbacks.closeStatisticsModal();
+    elements$2.statsModal.addEventListener('click', (e) => {
+      if (e.target === elements$2.statsModal) {
+        if (callbacks$1.closeStatisticsModal) callbacks$1.closeStatisticsModal();
       }
     });
+
+    elements$2.savedConnectionsModal.addEventListener('click', (e) => {
+      if (e.target === elements$2.savedConnectionsModal) {
+        if (callbacks$1.closeSavedConnectionsModal) callbacks$1.closeSavedConnectionsModal();
+      }
+    });
+  }
+
+  // Saved connections management module
+
+
+  let elements$1 = {};
+  let callbacks = {
+    renderConnectionList: null,
+    renderMessageList: null,
+    selectConnection: null
+  };
+
+  function initSavedConnectionsManager(el) {
+    elements$1 = el;
+  }
+
+  function setCallbacks(cb) {
+    callbacks = { ...callbacks, ...cb };
+  }
+
+  async function showSaveConnectionModal() {
+    const connection = state.connections[state.selectedConnectionId];
+    if (!connection) {
+      alert('请先选择一个连接');
+      return;
+    }
+
+    if (connection.messages.length === 0) {
+      alert('此连接没有消息数据');
+      return;
+    }
+
+    const existing = await isConnectionSaved(connection.id);
+    const defaultName = formatDateTime(connection.createdAt);
+
+    elements$1.presetModalTitle.textContent = '保存连接';
+    elements$1.presetModalBody.innerHTML = `
+    <div class="preset-form">
+      <div class="form-group">
+        <label class="form-label">连接名称</label>
+        <input type="text" id="connection-name-input" class="form-input"
+               placeholder="输入连接名称..."
+               value="${existing ? '（覆盖已保存的连接）' : defaultName}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">连接信息</label>
+        <div class="connection-info-box">
+          <div class="info-row"><strong>URL:</strong> <span class="info-url">${escapeHtml(connection.url)}</span></div>
+          <div><strong>消息数量:</strong> ${connection.messages.length} 条</div>
+          <div><strong>状态:</strong> ${connection.status}</div>
+          <div><strong>创建时间:</strong> ${defaultName}</div>
+        </div>
+      </div>
+    </div>
+  `;
+
+    elements$1.presetModalFooter.innerHTML = `
+    <button class="modal-btn" id="connection-cancel-btn">取消</button>
+    <button class="modal-btn primary" id="connection-save-btn">保存</button>
+  `;
+
+    elements$1.presetModal.style.display = 'flex';
+
+    const nameInput = document.getElementById('connection-name-input');
+    const saveBtn = document.getElementById('connection-save-btn');
+    const cancelBtn = document.getElementById('connection-cancel-btn');
+
+    cancelBtn.addEventListener('click', closeSavedConnectionsModal);
+
+    saveBtn.addEventListener('click', async () => {
+      if (!nameInput.value.trim()) {
+        alert('请输入连接名称');
+        return;
+      }
+
+      const name = nameInput.value.trim();
+      const options = { name };
+
+      if (existing) {
+        const existingData = await getConnectionByOriginalId(connection.id);
+        if (existingData) {
+          options.savedId = existingData.id;
+        }
+      }
+
+      try {
+        const savedData = await saveConnection(connection, options);
+        closeSavedConnectionsModal();
+        alert('连接保存成功！');
+
+        if (callbacks.renderConnectionList) {
+          callbacks.renderConnectionList();
+        }
+      } catch (error) {
+        console.error('保存失败:', error);
+        alert('保存失败，请重试');
+      }
+    });
+
+    nameInput.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') {
+        saveBtn.click();
+      }
+    });
+  }
+
+  async function showSavedConnectionsModal() {
+    const savedConnections = await getAllSavedConnections();
+
+    if (savedConnections.length === 0) {
+      alert('暂无已保存的连接');
+      return;
+    }
+
+    elements$1.savedConnectionsModalTitle.textContent = '已保存的连接';
+    renderSavedConnectionsList(savedConnections);
+    elements$1.savedConnectionsModal.style.display = 'flex';
+  }
+
+  function renderSavedConnectionsList(connections) {
+    elements$1.savedConnectionsList.innerHTML = connections.map(conn => {
+      const savedAt = formatDateTime(conn.savedAt);
+      const createdAt = formatDateTime(conn.createdAt);
+
+      return `
+      <div class="saved-connection-card" data-id="${conn.id}" data-original-id="${conn.originalId}">
+        <div class="saved-connection-info">
+          <div class="saved-connection-name">
+            ${escapeHtml(conn.name)}
+            ${conn.isIframe ? '<span class="badge-iframe">iframe</span>' : ''}
+          </div>
+          <div class="saved-connection-url" title="${escapeHtml(conn.url)}">
+            ${escapeHtml(conn.url)}
+          </div>
+          <div class="saved-connection-meta">
+            <span>💬 ${conn.messageCount} 条消息</span>
+            <span>📅 保存于 ${savedAt}</span>
+            <span>🕐 创建于 ${createdAt}</span>
+          </div>
+        </div>
+        <div class="saved-connection-actions">
+          <button class="saved-connection-btn load" title="加载此连接" data-id="${conn.id}">
+            📤 加载
+          </button>
+          <button class="saved-connection-btn delete" title="删除此连接" data-id="${conn.id}">
+            🗑️ 删除
+          </button>
+        </div>
+      </div>
+    `;
+    }).join('');
+
+    elements$1.savedConnectionsList.querySelectorAll('.saved-connection-btn.load').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        loadSavedConnection(btn.dataset.id);
+      });
+    });
+
+    elements$1.savedConnectionsList.querySelectorAll('.saved-connection-btn.delete').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        deleteSavedConnection(btn.dataset.id);
+      });
+    });
+  }
+
+  async function loadSavedConnection(savedId) {
+    try {
+      const savedData = await loadConnection(savedId);
+      if (!savedData) {
+        alert('未找到连接数据');
+        return;
+      }
+
+      const newConnectionId = `archived-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+      const connectionData = {
+        id: newConnectionId,
+        originalId: savedData.originalId,
+        savedId: savedId,
+        url: savedData.url,
+        frameUrl: savedData.frameUrl,
+        isIframe: savedData.isIframe,
+        source: savedData.source,
+        status: 'archived',
+        createdAt: savedData.createdAt,
+        messages: savedData.messages
+      };
+
+      addConnection$1(connectionData);
+
+      if (callbacks.selectConnection) {
+        callbacks.selectConnection(connectionData.id);
+      }
+
+      if (callbacks.renderConnectionList) {
+        callbacks.renderConnectionList();
+      }
+
+      if (callbacks.renderMessageList) {
+        callbacks.renderMessageList();
+      }
+
+      closeSavedConnectionsModal();
+    } catch (error) {
+      console.error('加载失败:', error);
+      alert('加载失败，请重试');
+    }
+  }
+
+  async function deleteSavedConnection(savedId) {
+    if (!confirm('确定要删除此连接吗？此操作不可恢复。')) {
+      return;
+    }
+
+    try {
+      await deleteConnection(savedId);
+      
+      const savedConnections = await getAllSavedConnections();
+      if (savedConnections.length === 0) {
+        closeSavedConnectionsModal();
+      } else {
+        renderSavedConnectionsList(savedConnections);
+      }
+
+      if (callbacks.renderConnectionList) {
+        callbacks.renderConnectionList();
+      }
+
+      alert('连接已删除');
+    } catch (error) {
+      console.error('删除失败:', error);
+      alert('删除失败，请重试');
+    }
+  }
+
+  async function deleteAllSavedConnections() {
+    const savedConnections = await getAllSavedConnections();
+    if (savedConnections.length === 0) {
+      alert('暂无已保存的连接');
+      return;
+    }
+
+    if (!confirm(`确定要删除所有 ${savedConnections.length} 个已保存的连接吗？此操作不可恢复。`)) {
+      return;
+    }
+
+    try {
+      await deleteAllConnections();
+      closeSavedConnectionsModal();
+      alert('所有连接已删除');
+      
+      if (callbacks.renderConnectionList) {
+        callbacks.renderConnectionList();
+      }
+    } catch (error) {
+      console.error('删除失败:', error);
+      alert('删除失败，请重试');
+    }
+  }
+
+  function closeSavedConnectionsModal() {
+    elements$1.savedConnectionsModal.style.display = 'none';
+  }
+
+  function formatDateTime(timestamp) {
+    const date = new Date(timestamp);
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    const seconds = String(date.getSeconds()).padStart(2, '0');
+    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
   }
 
   // Column resizer module
@@ -1595,7 +2074,16 @@
     presetModalClose: document.getElementById('preset-modal-close'),
     statsModal: document.getElementById('stats-modal'),
     statsModalBody: document.getElementById('stats-modal-body'),
-    statsModalClose: document.getElementById('stats-modal-close')
+    statsModalClose: document.getElementById('stats-modal-close'),
+    btnSaveConnection: document.getElementById('btn-save-connection'),
+    btnSavedConnections: document.getElementById('btn-saved-connections'),
+    savedConnectionsModal: document.getElementById('saved-connections-modal'),
+    savedConnectionsModalTitle: document.getElementById('saved-connections-modal-title'),
+    savedConnectionsModalBody: document.getElementById('saved-connections-modal-body'),
+    savedConnectionsList: document.getElementById('saved-connections-list'),
+    savedConnectionsModalClose: document.getElementById('saved-connections-modal-close'),
+    btnCloseSavedModal: document.getElementById('btn-close-saved-modal'),
+    btnDeleteAllSaved: document.getElementById('btn-delete-all-saved')
   };
 
   // Connect to background script
@@ -1640,6 +2128,7 @@
     initFilterManager(elements);
     initPresetManager(elements);
     initStatisticsManager(elements);
+    initSavedConnectionsManager(elements);
     initEventHandlers(elements, port);
     initColumnResizers();
 
@@ -1650,20 +2139,20 @@
   // Setup callbacks between modules to avoid circular dependencies
   function setupModuleCallbacks() {
     // Connection manager callbacks
-    setCallbacks$4({
+    setCallbacks$5({
       renderMessageList,
       showListView,
       renderFilterConditions
     });
 
     // Message renderer callbacks
-    setCallbacks$3({
+    setCallbacks$4({
       filterMessages,
       searchMessages
     });
 
     // Event handlers callbacks
-    setCallbacks({
+    setCallbacks$1({
       renderConnectionList,
       renderMessageList,
       showMessageDetail,
@@ -1674,19 +2163,30 @@
       closePresetModal,
       showStatisticsModal,
       closeStatisticsModal,
+      showSaveConnectionModal,
+      showSavedConnectionsModal,
+      closeSavedConnectionsModal,
+      deleteAllSavedConnections,
       updatePinButtonState
     });
 
     // Filter manager callbacks
-    setCallbacks$2({
+    setCallbacks$3({
       renderMessageList,
       updateFilterStats
     });
 
     // Preset manager callbacks
-    setCallbacks$1({
+    setCallbacks$2({
       renderMessageList,
       renderFilterConditions
+    });
+
+    // Saved connections manager callbacks
+    setCallbacks({
+      renderConnectionList,
+      renderMessageList,
+      selectConnection
     });
   }
 

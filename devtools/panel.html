@@ -92,7 +92,21 @@
   <div class="main-container">
     <!-- Left Panel: Connection List -->
     <div class="left-panel">
-      <div class="panel-header">连接列表</div>
+      <div class="panel-header">
+        <span style="flex: 1;">连接列表</span>
+        <button id="btn-save-connection" class="toolbar-btn" title="保存当前连接">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
+            <polyline points="17 21 17 13 7 13 7 21"></polyline>
+            <polyline points="7 3 7 8 15 8"></polyline>
+          </svg>
+        </button>
+        <button id="btn-saved-connections" class="toolbar-btn" title="已保存的连接">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"></path>
+          </svg>
+        </button>
+      </div>
       <div id="connection-list" class="connection-list">
         <div class="empty-state">暂无连接</div>
       </div>
@@ -267,6 +281,30 @@
             <div id="stats-connection-list" class="stats-list"></div>
           </div>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Saved Connections Modal -->
+  <div id="saved-connections-modal" class="modal" style="display: none;">
+    <div class="modal-content modal-large">
+      <div class="modal-header">
+        <h3 class="modal-title" id="saved-connections-modal-title">已保存的连接</h3>
+        <button class="modal-close" id="saved-connections-modal-close">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+      <div class="modal-body" id="saved-connections-modal-body">
+        <div class="saved-connections-list" id="saved-connections-list">
+          <!-- Dynamic content will be inserted here -->
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="modal-btn" id="btn-delete-all-saved" style="margin-right: auto;">全部删除</button>
+        <button class="modal-btn primary" id="btn-close-saved-modal">关闭</button>
       </div>
     </div>
   </div>

@@ -2,6 +2,7 @@
 
 import { state } from './state.js';
 import { getUrlPath, escapeHtml, getRequestType, log } from './utils.js';
+import { isConnectionSaved } from './connectionStorageManager.js';
 
 let elements = {};
 let callbacks = {
@@ -18,7 +19,7 @@ export function setCallbacks(cb) {
   callbacks = { ...callbacks, ...cb };
 }
 
-export function renderConnectionList() {
+export async function renderConnectionList() {
   const connections = Object.values(state.connections);
   const urlFilter = state.filter.toLowerCase();
   const typeFilter = state.requestTypeFilter;
@@ -41,9 +42,10 @@ export function renderConnectionList() {
     return;
   }
 
-  elements.connectionList.innerHTML = filtered.map(conn => {
+  const connectionHtml = await Promise.all(filtered.map(async (conn) => {
     const urlPath = getUrlPath(conn.url);
     const isSelected = conn.id === state.selectedConnectionId;
+    const isSaved = await isConnectionSaved(conn.originalId || conn.id);
     const badgeClass = conn.isIframe ? 'badge-iframe' : 'badge-main';
     const badgeText = conn.isIframe ? 'iframe' : '主页面';
     const statusClass = `status-${conn.status}`;
@@ -57,6 +59,8 @@ export function renderConnectionList() {
     const typeBadgeClass = typeBadgeMap[requestType] || 'badge-unknown';
     const typeBadgeText = requestType.toUpperCase();
 
+    const savedIndicator = isSaved ? '<span class="connection-saved-indicator" title="已保存到数据库">💾</span>' : '';
+
     return `
       <div class="connection-item ${isSelected ? 'selected' : ''}" data-id="${conn.id}">
         <div class="connection-url" title="${escapeHtml(conn.url)}">${escapeHtml(urlPath)}</div>
@@ -65,10 +69,13 @@ export function renderConnectionList() {
           <span class="connection-badge ${badgeClass}">${badgeText}</span>
           <span class="connection-badge ${typeBadgeClass}">${typeBadgeText}</span>
           <span class="message-count">${conn.messages.length} 条</span>
+          ${savedIndicator}
         </div>
       </div>
     `;
-  }).join('');
+  }));
+
+  elements.connectionList.innerHTML = connectionHtml.join('');
 
   elements.connectionList.querySelectorAll('.connection-item').forEach(item => {
     item.addEventListener('click', () => {
@@ -77,10 +84,10 @@ export function renderConnectionList() {
   });
 }
 
-export function selectConnection(connectionId) {
+export async function selectConnection(connectionId) {
   const isSelected = setSelectedConnection(connectionId);
 
-  renderConnectionList();
+  await renderConnectionList();
   if (callbacks.renderMessageList) callbacks.renderMessageList();
   if (callbacks.showListView) callbacks.showListView();
 

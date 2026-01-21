@@ -289,6 +289,120 @@ html, body {
   background-color: var(--error-color);
 }
 
+.status-archived {
+  background-color: var(--accent-color);
+}
+
+.connection-saved-indicator {
+  font-size: 12px;
+  margin-left: 4px;
+  opacity: 0.7;
+}
+
+.saved-connections-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.saved-connection-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  transition: all 0.2s;
+}
+
+.saved-connection-card:hover {
+  border-color: var(--accent-color);
+  background: var(--bg-hover);
+}
+
+.saved-connection-info {
+  flex: 1;
+  min-width: 0;
+  padding-right: 12px;
+}
+
+.saved-connection-name {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.saved-connection-url {
+  color: var(--accent-color);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-bottom: 4px;
+}
+
+.saved-connection-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+
+.saved-connection-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.saved-connection-btn {
+  padding: 4px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  cursor: pointer;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 11px;
+  transition: all 0.2s;
+}
+
+.saved-connection-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent-color);
+}
+
+.saved-connection-btn.load {
+  color: var(--accent-color);
+  border-color: var(--accent-color);
+}
+
+.saved-connection-btn.load:hover {
+  background: var(--accent-color);
+  color: #fff;
+}
+
+.saved-connection-btn.delete {
+  color: var(--error-color);
+  border-color: var(--border-color);
+}
+
+.saved-connection-btn.delete:hover {
+  background: var(--error-color);
+  color: #fff;
+  border-color: var(--error-color);
+}
+
+.status-error {
+  background-color: var(--error-color);
+}
+
 /* Resizer */
 .resizer {
   width: 4px;
@@ -1132,6 +1246,32 @@ html, body {
 
 .form-input:focus {
   border-color: var(--accent-color);
+}
+
+.connection-info-box {
+  font-size: 11px;
+  color: var(--text-secondary);
+  padding: 8px;
+  background: var(--bg-secondary);
+  border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.info-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: flex-start;
+}
+
+.info-url {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ============================================ */
